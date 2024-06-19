@@ -14,6 +14,8 @@ import torch._inductor.config as config
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
+from sophia import SophiaG
+
 with open(sys.argv[0]) as f:
     code = f.read()
 
@@ -160,7 +162,7 @@ class GPT(nn.Module):
         return logits, loss
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=betas)
+        optimizer = SophiaG(self.parameters(), lr=learning_rate, betas=betas, rho=0.05)
         return optimizer
 
 # -----------------------------------------------------------------------------
@@ -399,8 +401,23 @@ if __name__ == "__main__":
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
         # step the optimizer
-        optimizer.step()
+        optimizer.step(bs=tokens_per_fwdbwd)
         optimizer.zero_grad(set_to_none=True)
+
+        hessian_interval = 10
+        #hessian_interval = 1
+        if step % hessian_interval == 0:
+            # update the Hessian estimate using pseudo-gradients
+            with ctx:
+                logits, _ = model(x)
+            x, y = train_loader.next_batch()
+            y_sample = torch.distributions.Categorical(logits=logits).sample()
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y_sample.view(-1), ignore_index=-1)
+            # backward pass
+            loss.backward()
+            optimizer.update_hessian()
+            optimizer.zero_grad(set_to_none=True)
+
         # --------------- TRAINING SECTION END -------------------
         # everything that follows now is just diagnostics, prints, logging, etc.
 
