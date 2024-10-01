@@ -304,12 +304,13 @@ class Adam(Optimizer):
                 #update = adam_update # grafting noop, should just be adam
                 #update = (correct_buf1 + 0.1 * g) / (eps + correct_buf2.sqrt()) # NAdam
                 #update = zeroth_power_via_newtonschulz2(correct_buf1) # spectral GD
-                update = zeroth_power_via_newtonschulz2(correct_buf3) # spectral GD
+                #update = zeroth_power_via_newtonschulz2(correct_buf3) # spectral GD
+                update = zeroth_power_via_newtonschulz2(correct_buf3.bfloat16()).to(adam_update.dtype)
 
                 update = update * (adam_update.norm() / update.norm())
                 p.data.add_(update, alpha=-lr)
 
-def zeroth_power_via_newtonschulz2(G, steps=15, eps=1e-7):
+def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
     X = G / (torch.linalg.norm(G, ord='fro') + eps)
     is_long = X.size(0) > X.size(1)
     if is_long:
