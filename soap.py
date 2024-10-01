@@ -23,20 +23,15 @@ class SOAP(torch.optim.Optimizer):
                 state = self.state[p]
 
                 state['step'] = state.get('step', 0) + 1
-                    
-                # State initialization
-                if "exp_avg" not in state:
+                if state['step'] == 1:
                     # Exponential moving average of gradient values
                     state["exp_avg"] = torch.zeros_like(grad)
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(grad)
-                
-                if 'Q' not in state:
                     state['GG'] = [torch.zeros(d, d, device=grad.device) for d in grad.shape] # Will hold all the preconditioner matrices (L and R in the paper).
-                    #state['Q'] = self.get_orthogonal_matrix(state['GG'])
-                    state['Q'] = None
                     state['precondition_frequency'] = group['precondition_frequency']
                     state['shampoo_beta'] = group['shampoo_beta'] if group['shampoo_beta'] >= 0 else group["betas"][1]
+                    state['Q'] = None
                     self.update_preconditioner(grad, state)
                     continue # first step is skipped so that we never use the current gradients in the projection.
 
@@ -69,7 +64,7 @@ class SOAP(torch.optim.Optimizer):
 
                 # Update is done after the gradient step to avoid using current gradients in the projection.
                 self.update_preconditioner(grad, state)
-    
+
     def project(self, grad, state):
         """
         Projects the gradient to the eigenbases of the preconditioner.
@@ -77,7 +72,15 @@ class SOAP(torch.optim.Optimizer):
         for mat in state['Q']:
             grad = torch.tensordot(grad, mat, dims=[[0], [0]])
         return grad
-        
+
+    def project_back(self, grad, state):
+        """
+        Projects the gradient back to the original space.
+        """
+        for mat in state['Q']:
+            grad = torch.tensordot(grad, mat, dims=[[0], [1]])
+        return grad
+
     def update_preconditioner(self, grad, state):
         """
         Updates the preconditioner matrices and the eigenbases (L, R, Q_L, Q_R in the paper).
@@ -90,14 +93,6 @@ class SOAP(torch.optim.Optimizer):
             state['Q'] = self.get_orthogonal_matrix(state['GG'])
         if state['step'] > 0 and state['step'] % state['precondition_frequency'] == 0:
             state['Q'] = self.get_orthogonal_matrix_QR(state)
-
-    def project_back(self, grad, state):
-        """
-        Projects the gradient back to the original space.
-        """
-        for mat in state['Q']:
-            grad = torch.tensordot(grad, mat, dims=[[0], [1]])
-        return grad
 
     def get_orthogonal_matrix(self, mat):
         """
