@@ -162,7 +162,7 @@ class GPT(nn.Module):
     def configure_optimizers(self, weight_decay, learning_rate, betas):
         optimizer = CombinedOptimizer([
             torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
-            ZeroPowerSGD(self.transformer.h.parameters(), lr=10*learning_rate, momentum=betas[0], nesterov=True)
+            ZeroPowerSGD(self.transformer.h.parameters(), lr=learning_rate, betas=betas)
         ])
         return optimizer
 
@@ -178,6 +178,52 @@ class CombinedOptimizer:
             opt.zero_grad(**kwargs)
     def state_dict(self):
         return None
+
+from torch.optim.optimizer import Optimizer
+class ZeroPowerSGD(Optimizer):
+    def __init__(self, params, lr=0.0018, betas=(0.9, 0.95)):
+        defaults = dict(lr=lr, betas=betas)
+        super().__init__(params, defaults)
+        self.steps = 0
+
+    def step(self):
+        self.steps += 1
+        for group in self.param_groups:
+            lr = group['lr']
+            beta1, beta2 = group['betas']
+            for i, p in enumerate(group['params']):
+                g = p.grad
+                if g is None:
+                    continue
+
+                t = self.steps
+
+                beta3 = 0.9 # same as Adam momentum seems to be good here
+                buf3 = self.state[p].get('exp_avg3')
+                if buf3 is None:
+                    buf3 = torch.zeros_like(g)
+                    self.state[p]['exp_avg3'] = buf3
+                buf3.mul_(beta3).add_(g, alpha=1-beta3)
+                correct_buf3 = buf3 / (1 - beta3**t)
+                correct_buf3 += (1 - beta3) * g # Nesterov momentum
+
+                update = zeroth_power_via_newtonschulz2(correct_buf3.bfloat16()).to(p.dtype)
+
+                update = update * 10
+                p.data.add_(update, alpha=-lr)
+
+def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
+    X = G / (torch.linalg.norm(G, ord='fro') + eps)
+    is_long = X.size(0) > X.size(1)
+    if is_long:
+        X = X.T
+    for _ in range(steps):
+        A = X @ X.T
+        B = A @ X
+        X = 2 * X - 1.5 * B + 0.5 * A @ B
+    if is_long:
+        X = X.T
+    return X
 
 # -----------------------------------------------------------------------------
 # Our own simple Distributed Data Loader
@@ -253,50 +299,6 @@ class DistributedDataLoader:
         if self.current_position + (B * T * self.num_processes + 1) > len(self.tokens):
             self.advance()
         return x.cuda(), y.cuda()
-
-
-from torch.optim.optimizer import Optimizer
-class ZeroPowerSGD(Optimizer):
-    def __init__(self, params, lr=0.0018, momentum=0.9, nesterov=True):
-        defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov)
-        super().__init__(params, defaults)
-
-    def step(self):
-        for group in self.param_groups:
-            lr = group['lr']
-            momentum = group['momentum']
-            for i, p in enumerate(group['params']):
-                self.state[p]['steps'] = self.state[p].get('steps', 0) + 1
-                g = p.grad
-                if g is None:
-                    continue
-
-                buf = self.state[p].get('exp_avg')
-                if buf is None:
-                    buf = torch.zeros_like(g)
-                    self.state[p]['exp_avg'] = buf
-                buf.mul_(momentum).add_(g, alpha=1-momentum)
-                correct_buf = buf / (1 - momentum**self.state[p]['steps'])
-                if group['nesterov']:
-                    correct_buf += (1 - momentum) * g # Nesterov momentum
-
-                update = zeroth_power_via_newtonschulz2(correct_buf)
-                p.data.add_(update, alpha=-lr)
-
-@torch.compile
-def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
-    X = G / (torch.linalg.norm(G, ord='fro') + eps)
-    X = X.bfloat16()
-    is_long = X.size(0) > X.size(1)
-    if is_long:
-        X = X.T
-    for _ in range(steps):
-        A = X @ X.T
-        B = A @ X
-        X = 2 * X - 1.5 * B + 0.5 * A @ B
-    if is_long:
-        X = X.T
-    return X.to(G.dtype)
 
 # -----------------------------------------------------------------------------
 # int main
