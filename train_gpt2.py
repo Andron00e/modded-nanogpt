@@ -208,14 +208,14 @@ class ZeroPowerSGD(Optimizer):
 @torch.compile
 def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
     X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps)
-    is_long = X.size(0) > X.size(1)
-    if is_long:
+    is_lopsided = X.size(0) > X.size(1)
+    if is_lopsided:
         X = X.T
     for _ in range(steps):
         A = X @ X.T
         B = A @ X
         X = 2 * X - 1.5 * B + 0.5 * A @ B
-    if is_long:
+    if is_lopsided:
         X = X.T
     return X.to(G.dtype)
 
