@@ -143,19 +143,8 @@ class SOAP(torch.optim.Optimizer):
         """
         Projects the gradient to the eigenbases of the preconditioner.
         """
-        original_shape = grad.shape
-
         for mat in state['Q']:
-            if len(mat) > 0:
-                grad = torch.tensordot(
-                        grad,
-                        mat,
-                        dims=[[0], [0]],
-                    )
-            else:
-                permute_order = list(range(1, len(grad.shape))) + [0]
-                grad = grad.permute(permute_order)
-        
+            grad = torch.tensordot(grad, mat, dims=[[0], [0]])
         return grad
         
     def update_preconditioner(self, grad, state):
@@ -180,18 +169,8 @@ class SOAP(torch.optim.Optimizer):
         """
         Projects the gradient back to the original space.
         """
-        original_shape = grad.shape
         for mat in state['Q']:
-            if len(mat) > 0:
-                grad = torch.tensordot(
-                        grad,
-                        mat,
-                        dims=[[0], [1]],
-                    )
-            else:
-                permute_order = list(range(1, len(grad.shape))) + [0]
-                grad = grad.permute(permute_order)
-                
+            grad = torch.tensordot(grad, mat, dims=[[0], [1]])
         return grad
         
 
@@ -201,26 +180,17 @@ class SOAP(torch.optim.Optimizer):
         """
         matrix = []
         for m in mat:
-            if m.data.dtype != torch.float:
-                float_data = False
-                original_type = m.data.dtype
-                original_device = m.data.device
-                matrix.append(m.data.float())
-            else:
-                float_data = True
-                matrix.append(m.data)
+            matrix.append(m.data)
         
         final = []
         for m in matrix:
-            try:
-                _, Q = torch.linalg.eigh(m+1e-30*torch.eye(m.shape[0], device=m.device))
-            except:
-                _, Q = torch.linalg.eigh(m.to(torch.float64)+1e-30*torch.eye(m.shape[0], device=m.device))
-                Q = Q.to(m.dtype)
+            #try:
+            #    _, Q = torch.linalg.eigh(m+1e-30*torch.eye(m.shape[0], device=m.device))
+            #except:
+            #    _, Q = torch.linalg.eigh(m.to(torch.float64)+1e-30*torch.eye(m.shape[0], device=m.device))
+            #    Q = Q.to(m.dtype)
+            _, Q = torch.linalg.eigh(m+1e-30*torch.eye(m.shape[0], device=m.device))
             Q = torch.flip(Q, [1])
-
-            if not float_data:
-                Q = Q.to(original_device).type(original_type)
             final.append(Q)
         return final
         
@@ -236,16 +206,8 @@ class SOAP(torch.optim.Optimizer):
         matrix = []
         orth_matrix = []
         for m, o in zip(precond_list, orth_list):
-            if m.data.dtype != torch.float:
-                float_data = False
-                original_type = m.data.dtype
-                original_device = m.data.device
-                matrix.append(m.data.float())
-                orth_matrix.append(o.data.float())
-            else:
-                float_data = True
-                matrix.append(m.data.float())
-                orth_matrix.append(o.data.float())
+            matrix.append(m)
+            orth_matrix.append(o.data.float())
         
         exp_avg_sq = state['exp_avg_sq']
             
@@ -257,11 +219,8 @@ class SOAP(torch.optim.Optimizer):
             o = o[:, sort_idx]
             power_iter = m @ o
             Q, _ = torch.linalg.qr(power_iter)
-
-            if not float_data:
-                Q = Q.to(original_device).type(original_type)
             final.append(Q)
         
-                
         state['exp_avg_sq'] = exp_avg_sq
         return final
+
