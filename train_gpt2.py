@@ -74,6 +74,10 @@ class CombinedOptimizer:
         for opt in self.optimizers:
             opt.zero_grad(**kwargs)
 
+    def scale_lrs(self, lr_scale):
+        for base_lr, opt in zip(self.base_lrs, self.optimizers):
+            opt.param_groups[0]['lr'] = base_lr * lr_scale
+
     def state_dict(self):
         return [opt.state_dict() for opt in self.optimizers]
 
@@ -370,7 +374,6 @@ if __name__ == "__main__":
         "d36": GPTConfig(vocab_size=num_vocab, n_layer=36, n_head=20, n_embd=1280),
         "d48": GPTConfig(vocab_size=num_vocab, n_layer=48, n_head=25, n_embd=1600),
     }[args.model]
-    torch.manual_seed(0) # reproducibility
     model = GPT(model_config)
     model = model.cuda()
     if hasattr(config, "coordinate_descent_tuning"):
@@ -394,14 +397,14 @@ if __name__ == "__main__":
         assert it <= args.num_iterations
         # 1) linear warmup for warmup_iters steps
         if it < args.warmup_iters:
-            return args.learning_rate * (it+1) / args.warmup_iters
+            return (it+1) / args.warmup_iters
         # 2) constant lr for a while
         elif it < args.num_iterations - args.warmdown_iters:
-            return args.learning_rate
+            return 1.0
         # 3) linear warmdown
         else:
             decay_ratio = (args.num_iterations - it) / args.warmdown_iters
-            return args.learning_rate * decay_ratio
+            return decay_ratio
 
     run_id = str(uuid.uuid4())
     if master_process:
@@ -460,9 +463,8 @@ if __name__ == "__main__":
         for p in model.parameters():
             p.grad /= args.accumulation
         # determine and set the learning rate for this iteration
-        lr = get_lr(step)
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
+        lr_scale = get_lr(step)
+        optimizer.scale_lrs(lr_scale)
         # step the optimizer
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
@@ -473,7 +475,7 @@ if __name__ == "__main__":
 
         dist.all_reduce(train_loss, op=dist.ReduceOp.AVG)
         tokens_per_second = ddp_world_size * B * T / (t1 - t0)
-        print0(f"step {step+1:4d}/{args.num_iterations} | train loss {train_loss.item():.4f} | lr {lr:.2e} | ({(t1-t0)*1000:.2f} ms | {tokens_per_second:.0f} tok/s)")
+        print0(f"step {step+1:4d}/{args.num_iterations} | train loss {train_loss.item():.4f} | lr_scale {lr_scale:.2e} | ({(t1-t0)*1000:.2f} ms | {tokens_per_second:.0f} tok/s)")
         # log training loss to logfile
         if master_process:
             with open(logfile, "a") as f:
