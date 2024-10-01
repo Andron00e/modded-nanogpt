@@ -184,30 +184,26 @@ class ZeroPowerSGD(Optimizer):
     def __init__(self, params, lr=0.0018, betas=(0.9, 0.95)):
         defaults = dict(lr=lr, betas=betas)
         super().__init__(params, defaults)
-        self.steps = 0
 
     def step(self):
-        self.steps += 1
         for group in self.param_groups:
             lr = group['lr']
-            beta1, beta2 = group['betas']
             for i, p in enumerate(group['params']):
+                self.state[p]['steps'] = self.state[p].get('steps', 0) + 1
                 g = p.grad
                 if g is None:
                     continue
 
-                t = self.steps
+                momentum = 0.9 # same as Adam momentum seems to be good here
+                buf = self.state[p].get('exp_avg')
+                if buf is None:
+                    buf = torch.zeros_like(g)
+                    self.state[p]['exp_avg'] = buf
+                buf.mul_(momentum).add_(g, alpha=1-momentum)
+                correct_buf = buf / (1 - momentum**self.state[p]['steps'])
+                correct_buf += (1 - momentum) * g # Nesterov momentum
 
-                beta3 = 0.9 # same as Adam momentum seems to be good here
-                buf3 = self.state[p].get('exp_avg3')
-                if buf3 is None:
-                    buf3 = torch.zeros_like(g)
-                    self.state[p]['exp_avg3'] = buf3
-                buf3.mul_(beta3).add_(g, alpha=1-beta3)
-                correct_buf3 = buf3 / (1 - beta3**t)
-                correct_buf3 += (1 - beta3) * g # Nesterov momentum
-
-                update = zeroth_power_via_newtonschulz2(correct_buf3.bfloat16()).to(p.dtype)
+                update = zeroth_power_via_newtonschulz2(correct_buf.bfloat16()).to(p.dtype)
 
                 update = update * 10
                 p.data.add_(update, alpha=-lr)
