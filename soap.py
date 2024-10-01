@@ -16,11 +16,8 @@ class SOAP(torch.optim.Optimizer):
             If >= 0, use this beta for the preconditioner (L and R in paper, state['GG'] below) moving average instead of betas[1].
         eps (`float`, *optional*, defaults to 1e-08):
             Adam's epsilon for numerical stability.
-        weight_decay (`float`, *optional*, defaults to 0.01): weight decay coefficient.
         precondition_frequency (`int`, *optional*, defaults to 10):
             How often to update the preconditioner.
-        correct_bias (`bool`, *optional*, defaults to `True`):
-            Whether or not to use bias correction in Adam.
     """
 
     def __init__(
@@ -30,18 +27,14 @@ class SOAP(torch.optim.Optimizer):
         betas=(0.95, 0.95),
         shampoo_beta: float= -1,
         eps: float = 1e-8,
-        weight_decay: float = 0.01,
         precondition_frequency: int=10,
-        correct_bias: bool = True,
     ):
         defaults = {
             "lr": lr,
             "betas": betas,
             "shampoo_beta": shampoo_beta,
             "eps": eps,
-            "weight_decay": weight_decay,
             "precondition_frequency": precondition_frequency,
-            "correct_bias": correct_bias,
         }
         super().__init__(params, defaults)
         
@@ -90,8 +83,8 @@ class SOAP(torch.optim.Optimizer):
 
                 # Decay the first and second moment running average coefficient
                 # In-place operations to update the averages at the same time
-                exp_avg.mul_(beta1).add_(grad, alpha=(1.0 - beta1))
-                exp_avg_sq.mul_(beta2).add_(grad_projected.square(), alpha=(1.0 - beta2))
+                exp_avg.lerp_(grad, 1-beta1)
+                exp_avg_sq.lerp_(grad_projected.square(), 1-beta2)
 
                 denom = exp_avg_sq.sqrt().add_(group["eps"])
                 
@@ -100,29 +93,16 @@ class SOAP(torch.optim.Optimizer):
                 exp_avg_projected = self.project(exp_avg, state)
                 
                 step_size = group["lr"]
-                if group["correct_bias"]:
-                    bias_correction1 = 1.0 - beta1 ** (state["step"])
-                    bias_correction2 = 1.0 - beta2 ** (state["step"])
-                    step_size = step_size * (bias_correction2 ** .5) / bias_correction1
+                bias_correction1 = 1.0 - beta1 ** (state["step"])
+                bias_correction2 = 1.0 - beta2 ** (state["step"])
+                step_size = step_size * (bias_correction2 ** .5) / bias_correction1
 
                 # Projecting back the preconditioned (by Adam) exponential moving average of gradients
                 # to the original space
                 norm_grad = self.project_back(exp_avg_projected / denom, state)
 
                 p.add_(norm_grad, alpha=-step_size)
-                
 
-                # From AdamW code: Just adding the square of the weights to the loss function is *not*
-                # the correct way of using L2 regularization/weight decay with Adam,
-                # since that will interact with the m and v parameters in strange ways.
-                #
-                # Instead we want to decay the weights in a manner that doesn't interact
-                # with the m/v parameters. This is equivalent to adding the square
-                # of the weights to the loss with plain (non-momentum) SGD.
-                # Add weight decay at the end (fixed version)
-                if group["weight_decay"] > 0.0:
-                    p.add_(p, alpha=(-group["lr"] * group["weight_decay"]))
-                    
                 # Update is done after the gradient step to avoid using current gradients in the projection.
                 self.update_preconditioner(grad, state)
     
