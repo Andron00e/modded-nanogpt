@@ -227,7 +227,8 @@ class GPT(nn.Module):
     def configure_optimizers(self, weight_decay, learning_rate, betas):
         optimizer = CombinedOptimizer([
             torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
-            ZeroPowerSGD(self.transformer.h.parameters(), lr=10 * learning_rate, momentum=0.9)
+            ZeroPowerSGD(self.transformer.h.parameters(), lr=10 * learning_rate, momentum=0.9),
+            #torch.optim.AdamW(self.transformer.h.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
         ])
         return optimizer
 
@@ -388,7 +389,7 @@ if __name__ == "__main__":
 
     # init the optimizer
     optimizer = raw_model.configure_optimizers(weight_decay=args.weight_decay,
-                                               learning_rate=args.learning_rate, betas=(0.9, 0.98))
+                                               learning_rate=args.learning_rate, betas=(0.9, 0.99))
 
     # learning rate decay scheduler (linear warmup and warmdown)
     def get_lr(it):
