@@ -181,7 +181,7 @@ class CombinedOptimizer:
 
 from torch.optim.optimizer import Optimizer
 class ZeroPowerSGD(Optimizer):
-    def __init__(self, params, lr=0.0018, momentum=0.9, nesterov=True):
+    def __init__(self, params, lr=0.02, momentum=0.9, nesterov=True):
         defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov)
         super().__init__(params, defaults)
 
@@ -190,21 +190,18 @@ class ZeroPowerSGD(Optimizer):
             lr = group['lr']
             momentum = group['momentum']
             for i, p in enumerate(group['params']):
-                self.state[p]['steps'] = self.state[p].get('steps', 0) + 1
                 g = p.grad
                 if g is None:
                     continue
-
-                buf = self.state[p].get('exp_avg')
-                if buf is None:
-                    buf = torch.zeros_like(g)
-                    self.state[p]['exp_avg'] = buf
+                self.state[p]['steps'] = self.state[p].get('steps', 0) + 1 
+                if 'exp_avg' not in self.state[p]:
+                    self.state[p]['exp_avg'] = torch.zeros_like(g)
+                buf = self.state[p]['exp_avg']
                 buf.mul_(momentum).add_(g, alpha=1-momentum)
                 correct_buf = buf / (1 - momentum**self.state[p]['steps'])
                 correct_buf += (1 - momentum) * g # Nesterov momentum
 
                 update = zeroth_power_via_newtonschulz2(correct_buf)
-
                 update = update * 10
                 p.data.add_(update, alpha=-lr)
 
