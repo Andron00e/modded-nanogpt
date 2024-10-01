@@ -72,7 +72,7 @@ class SOAP(torch.optim.Optimizer):
                     )
                     self.update_preconditioner(grad, state)
                     continue # first step is skipped so that we never use the current gradients in the projection.
-                
+
                 # Projecting gradients to the eigenbases of Shampoo's preconditioner 
                 # i.e. projecting to the eigenbases of matrices in state['GG']
                 grad_projected = self.project(grad, state)
@@ -86,8 +86,6 @@ class SOAP(torch.optim.Optimizer):
                 exp_avg.lerp_(grad, 1-beta1)
                 exp_avg_sq.lerp_(grad_projected.square(), 1-beta2)
 
-                denom = exp_avg_sq.sqrt().add_(group["eps"])
-                
                 # Projecting the exponential moving average of gradients to the eigenbases of Shampoo's preconditioner 
                 # i.e. projecting to the eigenbases of matrices in state['GG']
                 exp_avg_projected = self.project(exp_avg, state)
@@ -99,6 +97,7 @@ class SOAP(torch.optim.Optimizer):
 
                 # Projecting back the preconditioned (by Adam) exponential moving average of gradients
                 # to the original space
+                denom = exp_avg_sq.sqrt().add_(group["eps"])
                 norm_grad = self.project_back(exp_avg_projected / denom, state)
 
                 p.add_(norm_grad, alpha=-step_size)
@@ -111,14 +110,11 @@ class SOAP(torch.optim.Optimizer):
         """
         Initializes the preconditioner matrices (L and R in the paper).
         """
-        state['GG'] = [] # Will hold all the preconditioner matrices (L and R in the paper).
-        for sh in grad.shape:
-            state['GG'].append(torch.zeros(sh, sh, device=grad.device))
-                    
+        state['GG'] = [torch.zeros(d, d, device=grad.device) for d in grad.shape] # Will hold all the preconditioner matrices (L and R in the paper).
         state['Q'] = None # Will hold all the eigenbases of the preconditioner.
         state['precondition_frequency'] = precondition_frequency
-        state['shampoo_beta'] = shampoo_beta          
-        
+        state['shampoo_beta'] = shampoo_beta
+
     def project(self, grad, state):
         """
         Projects the gradient to the eigenbases of the preconditioner.
@@ -135,7 +131,6 @@ class SOAP(torch.optim.Optimizer):
             # Contracts across all dimensions except for k.
             outer_product = torch.tensordot(grad, grad, dims=[[*chain(range(idx), range(idx + 1, len(grad.shape)))]] * 2)
             state['GG'][idx].lerp_(outer_product, 1-state['shampoo_beta'])
-                     
         if state['Q'] is None:
             state['Q'] = self.get_orthogonal_matrix(state['GG'])
         if state['step'] > 0 and state['step'] % state['precondition_frequency'] == 0:
@@ -148,7 +143,6 @@ class SOAP(torch.optim.Optimizer):
         for mat in state['Q']:
             grad = torch.tensordot(grad, mat, dims=[[0], [1]])
         return grad
-        
 
     def get_orthogonal_matrix(self, mat):
         """
@@ -165,7 +159,6 @@ class SOAP(torch.optim.Optimizer):
             Q = torch.flip(Q, [1])
             final.append(Q)
         return final
-        
 
     def get_orthogonal_matrix_QR(self, state):
         """
@@ -176,7 +169,7 @@ class SOAP(torch.optim.Optimizer):
         orth_list = state['Q']
 
         exp_avg_sq = state['exp_avg_sq']
-            
+
         final = []
         for ind, (m, o) in enumerate(zip(precond_list, orth_list)):
             est_eig = torch.diag(o.T @ m @ o)
@@ -186,7 +179,6 @@ class SOAP(torch.optim.Optimizer):
             power_iter = m @ o
             Q, _ = torch.linalg.qr(power_iter)
             final.append(Q)
-        
+
         state['exp_avg_sq'] = exp_avg_sq
         return final
-
