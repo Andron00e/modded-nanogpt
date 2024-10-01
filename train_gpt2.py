@@ -178,6 +178,8 @@ class CombinedOptimizer:
     def zero_grad(self, **kwargs):
         for opt in self.optimizers:
             opt.zero_grad(**kwargs)
+    def state_dict(self):
+        return None
 
 # -----------------------------------------------------------------------------
 # Our own simple Distributed Data Loader
@@ -290,9 +292,9 @@ class Adam(Optimizer):
                 eps = 1e-8
                 adam_update = correct_buf1 / (eps + correct_buf2.sqrt()) # for grafting
 
-                update = adam_update # grafting noop, should just be adam
+                #update = adam_update # grafting noop, should just be adam
                 #update = (correct_buf1 + 0.1 * g) / (eps + correct_buf2.sqrt()) # NAdam
-                #update = zeroth_power_via_newtonschulz2(correct_buf1) # spectral GD
+                update = zeroth_power_via_newtonschulz2(correct_buf1) # spectral GD
 
                 update = update * (adam_update.norm() / update.norm())
                 p.data.add_(update, alpha=-lr)
