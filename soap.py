@@ -50,8 +50,9 @@ class SOAP(torch.optim.Optimizer):
         """
         Performs a single optimization step.
         """
-        
         for group in self.param_groups:
+
+            beta1, beta2 = group["betas"]
             for p in group["params"]:
                 if p.grad is None:
                     continue
@@ -84,7 +85,6 @@ class SOAP(torch.optim.Optimizer):
                 grad_projected = self.project(grad, state)
 
                 exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
-                beta1, beta2 = group["betas"]
 
                 state["step"] += 1
 
@@ -152,12 +152,8 @@ class SOAP(torch.optim.Optimizer):
         Updates the preconditioner matrices and the eigenbases (L, R, Q_L, Q_R in the paper).
         """
         for idx, sh in enumerate(grad.shape):
-            outer_product = torch.tensordot(
-                    grad,
-                    grad,
-                    # Contracts across all dimensions except for k.
-                    dims=[[*chain(range(idx), range(idx + 1, len(grad.shape)))]] * 2,
-                )
+            # Contracts across all dimensions except for k.
+            outer_product = torch.tensordot(grad, grad, dims=[[*chain(range(idx), range(idx + 1, len(grad.shape)))]] * 2)
             state['GG'][idx].lerp_(outer_product, 1-state['shampoo_beta'])
                      
         if state['Q'] is None:
@@ -178,12 +174,8 @@ class SOAP(torch.optim.Optimizer):
         """
         Computes the eigenbases of the preconditioner using torch.linalg.eigh decomposition.
         """
-        matrix = []
-        for m in mat:
-            matrix.append(m.data)
-        
         final = []
-        for m in matrix:
+        for m in mat:
             #try:
             #    _, Q = torch.linalg.eigh(m+1e-30*torch.eye(m.shape[0], device=m.device))
             #except:
@@ -203,16 +195,10 @@ class SOAP(torch.optim.Optimizer):
         precond_list = state['GG']
         orth_list = state['Q']
 
-        matrix = []
-        orth_matrix = []
-        for m, o in zip(precond_list, orth_list):
-            matrix.append(m)
-            orth_matrix.append(o.data.float())
-        
         exp_avg_sq = state['exp_avg_sq']
             
         final = []
-        for ind, (m, o) in enumerate(zip(matrix, orth_matrix)):
+        for ind, (m, o) in enumerate(zip(precond_list, orth_list)):
             est_eig = torch.diag(o.T @ m @ o)
             sort_idx = torch.argsort(est_eig, descending=True)
             exp_avg_sq = exp_avg_sq.index_select(ind, sort_idx)
