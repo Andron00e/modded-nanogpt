@@ -26,9 +26,6 @@ class SOAP(optim.Optimizer):
         weight_decay (`float`, *optional*, defaults to 0.01): weight decay coefficient.
         precondition_frequency (`int`, *optional*, defaults to 10):
             How often to update the preconditioner.
-        max_precond_dim (`int`, *optional*, defaults to 10000):
-            Maximum dimension of the preconditioner.
-            Set to 10000, so that we exclude most common vocab sizes while including layers.
         correct_bias (`bool`, *optional*, defaults to `True`):
             Whether or not to use bias correction in Adam.
     """
@@ -42,7 +39,6 @@ class SOAP(optim.Optimizer):
         eps: float = 1e-8,
         weight_decay: float = 0.01,
         precondition_frequency: int=10,
-        max_precond_dim: int=10000, # 
         correct_bias: bool = True,
     ):
         defaults = {
@@ -52,7 +48,6 @@ class SOAP(optim.Optimizer):
             "eps": eps,
             "weight_decay": weight_decay,
             "precondition_frequency": precondition_frequency,
-            "max_precond_dim": max_precond_dim,
             "correct_bias": correct_bias,
         }
         super().__init__(params, defaults)
@@ -87,16 +82,13 @@ class SOAP(optim.Optimizer):
                         state,
                         precondition_frequency=group['precondition_frequency'],
                         shampoo_beta=(group['shampoo_beta'] if group['shampoo_beta'] >= 0 else group["betas"][1]),
-                        max_precond_dim=group['max_precond_dim'],
                     )
-                    self.update_preconditioner(grad, state,
-                                               max_precond_dim=group['max_precond_dim'])
+                    self.update_preconditioner(grad, state)
                     continue # first step is skipped so that we never use the current gradients in the projection.
                 
                 # Projecting gradients to the eigenbases of Shampoo's preconditioner 
                 # i.e. projecting to the eigenbases of matrices in state['GG']
-                grad_projected = self.project(grad, state,
-                                              max_precond_dim=group['max_precond_dim'])
+                grad_projected = self.project(grad, state)
 
                 exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
                 beta1, beta2 = group["betas"]
@@ -112,8 +104,7 @@ class SOAP(optim.Optimizer):
                 
                 # Projecting the exponential moving average of gradients to the eigenbases of Shampoo's preconditioner 
                 # i.e. projecting to the eigenbases of matrices in state['GG']
-                exp_avg_projected = self.project(exp_avg, state,
-                                                 max_precond_dim=group['max_precond_dim'])
+                exp_avg_projected = self.project(exp_avg, state)
                 
                 step_size = group["lr"]
                 if group["correct_bias"]:
@@ -123,8 +114,7 @@ class SOAP(optim.Optimizer):
 
                 # Projecting back the preconditioned (by Adam) exponential moving average of gradients
                 # to the original space
-                norm_grad = self.project_back(exp_avg_projected / denom, state,
-                                                 max_precond_dim=group['max_precond_dim'])
+                norm_grad = self.project_back(exp_avg_projected / denom, state)
 
                 p.add_(norm_grad, alpha=-step_size)
                 
@@ -141,11 +131,10 @@ class SOAP(optim.Optimizer):
                     p.add_(p, alpha=(-group["lr"] * group["weight_decay"]))
                     
                 # Update is done after the gradient step to avoid using current gradients in the projection.
-                self.update_preconditioner(grad, state, 
-                                               max_precond_dim=group['max_precond_dim'])
+                self.update_preconditioner(grad, state)
     
     def init_preconditioner(self, grad, state, precondition_frequency=10, 
-                            shampoo_beta=0.95, max_precond_dim=10000):
+                            shampoo_beta=0.95):
         """
         Initializes the preconditioner matrices (L and R in the paper).
         """
@@ -154,16 +143,13 @@ class SOAP(optim.Optimizer):
             state['GG'].append([])
         else:
             for sh in grad.shape:
-                if sh > max_precond_dim:
-                    state['GG'].append([])
-                else:
-                    state['GG'].append(torch.zeros(sh, sh, device=grad.device))
+                state['GG'].append(torch.zeros(sh, sh, device=grad.device))
                     
         state['Q'] = None # Will hold all the eigenbases of the preconditioner.
         state['precondition_frequency'] = precondition_frequency
         state['shampoo_beta'] = shampoo_beta          
         
-    def project(self, grad, state, max_precond_dim=10000):
+    def project(self, grad, state):
         """
         Projects the gradient to the eigenbases of the preconditioner.
         """
@@ -182,27 +168,25 @@ class SOAP(optim.Optimizer):
         
         return grad
         
-    def update_preconditioner(self, grad, state, 
-                              max_precond_dim=10000):
+    def update_preconditioner(self, grad, state):
         """
         Updates the preconditioner matrices and the eigenbases (L, R, Q_L, Q_R in the paper).
         """
         for idx, sh in enumerate(grad.shape):
-            if sh <= max_precond_dim:
-                outer_product = torch.tensordot(
-                        grad,
-                        grad,
-                        # Contracts across all dimensions except for k.
-                        dims=[[*chain(range(idx), range(idx + 1, len(grad.shape)))]] * 2,
-                    )
-                state['GG'][idx].lerp_(outer_product, 1-state['shampoo_beta'])
+            outer_product = torch.tensordot(
+                    grad,
+                    grad,
+                    # Contracts across all dimensions except for k.
+                    dims=[[*chain(range(idx), range(idx + 1, len(grad.shape)))]] * 2,
+                )
+            state['GG'][idx].lerp_(outer_product, 1-state['shampoo_beta'])
                      
         if state['Q'] is None:
             state['Q'] = self.get_orthogonal_matrix(state['GG'])
         if state['step'] > 0 and state['step'] % state['precondition_frequency'] == 0:
-            state['Q'] = self.get_orthogonal_matrix_QR(state, max_precond_dim)           
+            state['Q'] = self.get_orthogonal_matrix_QR(state)
 
-    def project_back(self, grad, state, max_precond_dim=10000):
+    def project_back(self, grad, state):
         """
         Projects the gradient back to the original space.
         """
@@ -257,7 +241,7 @@ class SOAP(optim.Optimizer):
         return final
         
 
-    def get_orthogonal_matrix_QR(self, state, max_precond_dim=10000):
+    def get_orthogonal_matrix_QR(self, state):
         """
         Computes the eigenbases of the preconditioner using one round of power iteration 
         followed by torch.linalg.qr decomposition.
