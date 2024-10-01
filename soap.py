@@ -1,44 +1,13 @@
-from itertools import chain
 import torch
 
 class SOAP(torch.optim.Optimizer):
     """
     Implements SOAP algorithm (https://arxiv.org/abs/2409.11321).
-
-    Parameters:
-        params (`Iterable[nn.parameter.Parameter]`):
-            Iterable of parameters to optimize or dictionaries defining parameter groups.
-        lr (`float`, *optional*, defaults to 0.003):
-            The learning rate to use.
-        betas (`Tuple[float,float]`, *optional*, defaults to `(0.95, 0.95)`):
-            Adam's betas parameters (b1, b2).
-        shampoo_beta (`float`, *optional*, defaults to -1):
-            If >= 0, use this beta for the preconditioner (L and R in paper, state['GG'] below) moving average instead of betas[1].
-        eps (`float`, *optional*, defaults to 1e-08):
-            Adam's epsilon for numerical stability.
-        precondition_frequency (`int`, *optional*, defaults to 10):
-            How often to update the preconditioner.
     """
-
-    def __init__(
-        self,
-        params,
-        lr: float = 3e-3,
-        betas=(0.95, 0.95),
-        shampoo_beta: float= -1,
-        eps: float = 1e-8,
-        precondition_frequency: int=10,
-    ):
-        defaults = {
-            "lr": lr,
-            "betas": betas,
-            "shampoo_beta": shampoo_beta,
-            "eps": eps,
-            "precondition_frequency": precondition_frequency,
-        }
+    def __init__(self, params, lr=3e-3, betas=(0.95, 0.95), shampoo_beta=-1, eps=1e-8, precondition_frequency=10):
+        defaults = dict(lr=lr, betas=betas, shampoo_beta=shampoo_beta, eps=eps, precondition_frequency=precondition_frequency)
         super().__init__(params, defaults)
         
-    @torch.no_grad()
     def step(self):
         """
         Performs a single optimization step.
@@ -98,7 +67,7 @@ class SOAP(torch.optim.Optimizer):
                 denom = exp_avg_sq.sqrt().add_(group["eps"])
                 norm_grad = self.project_back(exp_avg_projected / denom, state)
 
-                p.add_(norm_grad, alpha=-step_size)
+                p.data.add_(norm_grad, alpha=-step_size)
 
                 # Update is done after the gradient step to avoid using current gradients in the projection.
                 self.update_preconditioner(grad, state)
