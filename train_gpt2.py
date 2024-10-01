@@ -370,6 +370,7 @@ if __name__ == "__main__":
         "d36": GPTConfig(vocab_size=num_vocab, n_layer=36, n_head=20, n_embd=1280),
         "d48": GPTConfig(vocab_size=num_vocab, n_layer=48, n_head=25, n_embd=1600),
     }[args.model]
+    torch.manual_seed(0) # reproducibility
     model = GPT(model_config)
     model = model.cuda()
     if hasattr(config, "coordinate_descent_tuning"):
