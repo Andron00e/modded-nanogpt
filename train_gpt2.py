@@ -16,6 +16,72 @@ with open(sys.argv[0]) as f:
     code = f.read()
 
 # -----------------------------------------------------------------------------
+# ZeroPowerOptimizer
+
+class CombinedOptimizer:
+
+    def __init__(self, optimizers):
+        self.optimizers = optimizers
+        assert all(len(opt.param_groups) == 1 for opt in self.optimizers)
+        self.param_groups = [pg for opt in self.optimizers for pg in opt.param_groups]
+        self.base_lrs = [opt.param_groups[0]['lr'] for opt in self.optimizers]
+
+    def step(self):
+        for opt in self.optimizers:
+            opt.step()
+
+    def zero_grad(self, **kwargs):
+        for opt in self.optimizers:
+            opt.zero_grad(**kwargs)
+
+    def state_dict(self):
+        return [opt.state_dict() for opt in self.optimizers]
+
+    def update_lr(self, lr_scale):
+        for base_lr, opt in zip(self.base_lrs, self.optimizers):
+            opt.param_groups[0]['lr'] = base_lr * lr_scale
+
+from torch.optim.optimizer import Optimizer
+class ZeroPowerSGD(Optimizer):
+    def __init__(self, params, lr=0.02, momentum=0.9, nesterov=True):
+        defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov)
+        super().__init__(params, defaults)
+
+    def step(self):
+        for group in self.param_groups:
+            lr = group['lr']
+            momentum = group['momentum']
+            for i, p in enumerate(group['params']):
+                g = p.grad
+                if g is None:
+                    continue
+                self.state[p]['steps'] = self.state[p].get('steps', 0) + 1 
+                if 'exp_avg' not in self.state[p]:
+                    self.state[p]['exp_avg'] = torch.zeros_like(g)
+                buf = self.state[p]['exp_avg']
+                buf.lerp_(g, 1-momentum)
+                correct_buf = buf / (1 - momentum**self.state[p]['steps'])
+                correct_buf.add_(g, alpha=1-momentum) # Nesterov momentum
+
+                update = zeroth_power_via_newtonschulz2(correct_buf)
+                update = update * 10
+                p.data.add_(update, alpha=-lr)
+
+@torch.compile
+def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
+    X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps)
+    is_lopsided = X.size(0) > X.size(1)
+    if is_lopsided:
+        X = X.T
+    for _ in range(steps):
+        A = X @ X.T
+        B = A @ X
+        X = 2 * X - 1.5 * B + 0.5 * A @ B
+    if is_lopsided:
+        X = X.T
+    return X.to(G.dtype)
+
+# -----------------------------------------------------------------------------
 # PyTorch nn.Module definitions for the GPT-2 model
 
 class Rotary(torch.nn.Module):
@@ -165,69 +231,6 @@ class GPT(nn.Module):
             ZeroPowerSGD(self.transformer.h.parameters(), lr=learning_rate, momentum=betas[0])
         ])
         return optimizer
-
-class CombinedOptimizer:
-
-    def __init__(self, optimizers):
-        self.optimizers = optimizers
-        assert all(len(opt.param_groups) == 1 for opt in self.optimizers)
-        self.param_groups = [pg for opt in self.optimizers for pg in opt.param_groups]
-        self.base_lrs = [opt.param_groups[0]['lr'] for opt in self.optimizers]
-
-    def step(self):
-        for opt in self.optimizers:
-            opt.step()
-
-    def zero_grad(self, **kwargs):
-        for opt in self.optimizers:
-            opt.zero_grad(**kwargs)
-
-    def state_dict(self):
-        return [opt.state_dict() for opt in self.optimizers]
-
-    def update_lr(self, lr_scale):
-        for base_lr, opt in zip(self.base_lrs, self.optimizers):
-            opt.param_groups[0]['lr'] = base_lr * lr_scale
-
-from torch.optim.optimizer import Optimizer
-class ZeroPowerSGD(Optimizer):
-    def __init__(self, params, lr=0.02, momentum=0.9, nesterov=True):
-        defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov)
-        super().__init__(params, defaults)
-
-    def step(self):
-        for group in self.param_groups:
-            lr = group['lr']
-            momentum = group['momentum']
-            for i, p in enumerate(group['params']):
-                g = p.grad
-                if g is None:
-                    continue
-                self.state[p]['steps'] = self.state[p].get('steps', 0) + 1 
-                if 'exp_avg' not in self.state[p]:
-                    self.state[p]['exp_avg'] = torch.zeros_like(g)
-                buf = self.state[p]['exp_avg']
-                buf.lerp_(g, 1-momentum)
-                correct_buf = buf / (1 - momentum**self.state[p]['steps'])
-                correct_buf.add_(g, alpha=1-momentum) # Nesterov momentum
-
-                update = zeroth_power_via_newtonschulz2(correct_buf)
-                update = update * 10
-                p.data.add_(update, alpha=-lr)
-
-@torch.compile
-def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
-    X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps)
-    is_lopsided = X.size(0) > X.size(1)
-    if is_lopsided:
-        X = X.T
-    for _ in range(steps):
-        A = X @ X.T
-        B = A @ X
-        X = 2 * X - 1.5 * B + 0.5 * A @ B
-    if is_lopsided:
-        X = X.T
-    return X.to(G.dtype)
 
 # -----------------------------------------------------------------------------
 # Our own simple Distributed Data Loader
