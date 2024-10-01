@@ -18,31 +18,23 @@ with open(sys.argv[0]) as f:
 # -----------------------------------------------------------------------------
 # ZeroPowerOptimizer
 
-class CombinedOptimizer:
-
-    def __init__(self, optimizers):
-        self.optimizers = optimizers
-        assert all(len(opt.param_groups) == 1 for opt in self.optimizers)
-        self.param_groups = [pg for opt in self.optimizers for pg in opt.param_groups]
-        self.base_lrs = [opt.param_groups[0]['lr'] for opt in self.optimizers]
-
-    def step(self):
-        for opt in self.optimizers:
-            opt.step()
-
-    def zero_grad(self, **kwargs):
-        for opt in self.optimizers:
-            opt.zero_grad(**kwargs)
-
-    def state_dict(self):
-        return [opt.state_dict() for opt in self.optimizers]
-
-    def update_lr(self, lr_scale):
-        for base_lr, opt in zip(self.base_lrs, self.optimizers):
-            opt.param_groups[0]['lr'] = base_lr * lr_scale
+@torch.compile
+def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
+    X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps)
+    is_lopsided = X.size(0) > X.size(1)
+    if is_lopsided:
+        X = X.T
+    for _ in range(steps):
+        A = X @ X.T
+        B = A @ X
+        X = 2 * X - 1.5 * B + 0.5 * A @ B
+    if is_lopsided:
+        X = X.T
+    return X.to(G.dtype)
 
 from torch.optim.optimizer import Optimizer
 class ZeroPowerSGD(Optimizer):
+
     def __init__(self, params, lr=0.02, momentum=0.9, nesterov=True):
         defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov)
         super().__init__(params, defaults)
@@ -67,24 +59,34 @@ class ZeroPowerSGD(Optimizer):
                 update = update * 10
                 p.data.add_(update, alpha=-lr)
 
-@torch.compile
-def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
-    X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps)
-    is_lopsided = X.size(0) > X.size(1)
-    if is_lopsided:
-        X = X.T
-    for _ in range(steps):
-        A = X @ X.T
-        B = A @ X
-        X = 2 * X - 1.5 * B + 0.5 * A @ B
-    if is_lopsided:
-        X = X.T
-    return X.to(G.dtype)
+class CombinedOptimizer:
+
+    def __init__(self, optimizers):
+        self.optimizers = optimizers
+        assert all(len(opt.param_groups) == 1 for opt in self.optimizers)
+        self.param_groups = [pg for opt in self.optimizers for pg in opt.param_groups]
+        self.base_lrs = [opt.param_groups[0]['lr'] for opt in self.optimizers]
+
+    def step(self):
+        for opt in self.optimizers:
+            opt.step()
+
+    def zero_grad(self, **kwargs):
+        for opt in self.optimizers:
+            opt.zero_grad(**kwargs)
+
+    def state_dict(self):
+        return [opt.state_dict() for opt in self.optimizers]
+
+    def update_lr(self, lr_scale):
+        for base_lr, opt in zip(self.base_lrs, self.optimizers):
+            opt.param_groups[0]['lr'] = base_lr * lr_scale
 
 # -----------------------------------------------------------------------------
 # PyTorch nn.Module definitions for the GPT-2 model
 
 class Rotary(torch.nn.Module):
+
     def __init__(self, dim, base=10000):
         super().__init__()
         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
