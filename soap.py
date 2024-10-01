@@ -80,7 +80,7 @@ class SOAP(torch.optim.Optimizer):
         """
         Updates the preconditioner matrices and the eigenbases (L, R, Q_L, Q_R in the paper).
         """
-        for idx, sh in enumerate(grad.shape):
+        for idx in range(len(grad.shape)):
             # Contracts across all dimensions except for k.
             outer_product = torch.tensordot(grad, grad, dims=[list(range(idx))+list(range(idx+1, len(grad.shape)))]*2)
             state['GG'][idx].lerp_(outer_product, 1-state['shampoo_beta'])
