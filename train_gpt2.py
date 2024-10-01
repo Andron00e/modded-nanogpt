@@ -292,14 +292,14 @@ class Adam(Optimizer):
                 eps = 1e-8
                 adam_update = correct_buf1 / (eps + correct_buf2.sqrt()) # for grafting
 
-                beta3 = 0.9
+                beta3 = 0.9 # same as Adam momentum seems to be good here
                 buf3 = self.state[p].get('exp_avg3')
                 if buf3 is None:
                     buf3 = torch.zeros_like(g)
                     self.state[p]['exp_avg3'] = buf3
                 buf3.mul_(beta3).add_(g, alpha=1-beta3)
                 correct_buf3 = buf3 / (1 - beta3**t)
-                correct_buf3 += (1 - beta3) * g
+                correct_buf3 += (1 - beta3) * g # Nesterov momentum
 
                 #update = adam_update # grafting noop, should just be adam
                 #update = (correct_buf1 + 0.1 * g) / (eps + correct_buf2.sqrt()) # NAdam
