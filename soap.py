@@ -1,14 +1,7 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
-
 from itertools import chain
+import torch
 
-# Parts of the code are modifications of Pytorch's AdamW optimizer
-# Parts of the code are modifications of code from https://github.com/jiaweizzhao/GaLore/blob/master/galore_torch/galore_projector.py
-
-
-class SOAP(optim.Optimizer):
+class SOAP(torch.optim.Optimizer):
     """
     Implements SOAP algorithm (https://arxiv.org/abs/2409.11321).
 
@@ -139,11 +132,8 @@ class SOAP(optim.Optimizer):
         Initializes the preconditioner matrices (L and R in the paper).
         """
         state['GG'] = [] # Will hold all the preconditioner matrices (L and R in the paper).
-        if grad.dim() == 1:
-            state['GG'].append([])
-        else:
-            for sh in grad.shape:
-                state['GG'].append(torch.zeros(sh, sh, device=grad.device))
+        for sh in grad.shape:
+            state['GG'].append(torch.zeros(sh, sh, device=grad.device))
                     
         state['Q'] = None # Will hold all the eigenbases of the preconditioner.
         state['precondition_frequency'] = precondition_frequency
@@ -211,9 +201,6 @@ class SOAP(optim.Optimizer):
         """
         matrix = []
         for m in mat:
-            if len(m) == 0:
-                matrix.append([])
-                continue
             if m.data.dtype != torch.float:
                 float_data = False
                 original_type = m.data.dtype
@@ -225,9 +212,6 @@ class SOAP(optim.Optimizer):
         
         final = []
         for m in matrix:
-            if len(m) == 0:
-                final.append([])
-                continue
             try:
                 _, Q = torch.linalg.eigh(m+1e-30*torch.eye(m.shape[0], device=m.device))
             except:
@@ -251,11 +235,7 @@ class SOAP(optim.Optimizer):
 
         matrix = []
         orth_matrix = []
-        for m,o in zip(precond_list, orth_list):
-            if len(m) == 0:
-                matrix.append([])
-                orth_matrix.append([])
-                continue
+        for m, o in zip(precond_list, orth_list):
             if m.data.dtype != torch.float:
                 float_data = False
                 original_type = m.data.dtype
@@ -267,18 +247,14 @@ class SOAP(optim.Optimizer):
                 matrix.append(m.data.float())
                 orth_matrix.append(o.data.float())
         
-        orig_shape = state['exp_avg_sq'].shape
         exp_avg_sq = state['exp_avg_sq']
             
         final = []
-        for ind, (m,o) in enumerate(zip(matrix, orth_matrix)):
-            if len(m)==0:
-                final.append([])
-                continue
+        for ind, (m, o) in enumerate(zip(matrix, orth_matrix)):
             est_eig = torch.diag(o.T @ m @ o)
             sort_idx = torch.argsort(est_eig, descending=True)
             exp_avg_sq = exp_avg_sq.index_select(ind, sort_idx)
-            o = o[:,sort_idx]
+            o = o[:, sort_idx]
             power_iter = m @ o
             Q, _ = torch.linalg.qr(power_iter)
 
