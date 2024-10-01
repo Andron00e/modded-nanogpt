@@ -20,15 +20,14 @@ with open(sys.argv[0]) as f:
 
 @torch.compile
 def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
-    X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps)
-    is_lopsided = X.size(0) > X.size(1)
-    if is_lopsided:
+    X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps) # ensure top singular value <= 1
+    if G.size(0) > G.size(1)
         X = X.T
     for _ in range(steps):
         A = X @ X.T
         B = A @ X
         X = 2 * X - 1.5 * B + 0.5 * A @ B
-    if is_lopsided:
+    if G.size(0) > G.size(1):
         X = X.T
     return X.to(G.dtype)
 
@@ -55,7 +54,6 @@ class ZeroPowerSGD(Optimizer):
                 correct_buf.add_(g, alpha=1-momentum) # Nesterov momentum
 
                 update = zeroth_power_via_newtonschulz2(correct_buf)
-                update = update * 10
                 p.data.add_(update, alpha=-lr)
 
 class CombinedOptimizer:
@@ -229,7 +227,7 @@ class GPT(nn.Module):
     def configure_optimizers(self, weight_decay, learning_rate, betas):
         optimizer = CombinedOptimizer([
             torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
-            ZeroPowerSGD(self.transformer.h.parameters(), lr=learning_rate, momentum=betas[0])
+            ZeroPowerSGD(self.transformer.h.parameters(), lr=0.024, momentum=0.9)
         ])
         return optimizer
 
