@@ -161,8 +161,23 @@ class GPT(nn.Module):
 
     def configure_optimizers(self, weight_decay, learning_rate, betas):
         #optimizer = torch.optim.AdamW(self.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=betas)
-        optimizer = Adam(self.parameters(), lr=learning_rate, betas=betas)
+        #optimizer = Adam(self.parameters(), lr=learning_rate, betas=betas)
+        optimizer = CombinedOptimizer([
+            torch.optim.AdamW([self.lm_head.weight], lr=learning_rate, betas=betas, weight_decay=0),
+            Adam(self.transformer.h.parameters(), lr=learning_rate, betas=betas)
+        ])
         return optimizer
+
+class CombinedOptimizer:
+    def __init__(self, optimizers):
+        self.optimizers = optimizers
+        self.param_groups = [pg for opt in self.optimizers for pg in opt.param_groups]
+    def step(self):
+        for opt in self.optimizers:
+            opt.step()
+    def zero_grad(self, **kwargs):
+        for opt in self.optimizers:
+            opt.zero_grad(**kwargs)
 
 # -----------------------------------------------------------------------------
 # Our own simple Distributed Data Loader
@@ -275,9 +290,9 @@ class Adam(Optimizer):
                 eps = 1e-8
                 adam_update = correct_buf1 / (eps + correct_buf2.sqrt()) # for grafting
 
-                #update = adam_update # grafting noop, should just be adam
+                update = adam_update # grafting noop, should just be adam
                 #update = (correct_buf1 + 0.1 * g) / (eps + correct_buf2.sqrt()) # NAdam
-                update = zeroth_power_via_newtonschulz2(correct_buf1) # stochastic GD
+                #update = zeroth_power_via_newtonschulz2(correct_buf1) # spectral GD
 
                 update = update * (adam_update.norm() / update.norm())
                 p.data.add_(update, alpha=-lr)
