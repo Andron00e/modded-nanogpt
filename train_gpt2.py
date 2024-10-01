@@ -21,7 +21,7 @@ with open(sys.argv[0]) as f:
 @torch.compile
 def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
     X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps) # ensure top singular value <= 1
-    if G.size(0) > G.size(1)
+    if G.size(0) > G.size(1):
         X = X.T
     for _ in range(steps):
         A = X @ X.T
