@@ -162,7 +162,7 @@ class GPT(nn.Module):
     def configure_optimizers(self, weight_decay, learning_rate, betas):
         optimizer = CombinedOptimizer([
             torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
-            ZeroPowerSGD(self.transformer.h.parameters(), lr=learning_rate, betas=betas)
+            ZeroPowerSGD(self.transformer.h.parameters(), lr=learning_rate)
         ])
         return optimizer
 
@@ -181,20 +181,20 @@ class CombinedOptimizer:
 
 from torch.optim.optimizer import Optimizer
 class ZeroPowerSGD(Optimizer):
-    def __init__(self, params, lr=0.0018, betas=(0.9, 0.95)):
-        defaults = dict(lr=lr, betas=betas)
+    def __init__(self, params, lr=0.0018, momentum=0.9, nesterov=True):
+        defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov)
         super().__init__(params, defaults)
 
     def step(self):
         for group in self.param_groups:
             lr = group['lr']
+            momentum = group['momentum']
             for i, p in enumerate(group['params']):
                 self.state[p]['steps'] = self.state[p].get('steps', 0) + 1
                 g = p.grad
                 if g is None:
                     continue
 
-                momentum = 0.9 # same as Adam momentum seems to be good here
                 buf = self.state[p].get('exp_avg')
                 if buf is None:
                     buf = torch.zeros_like(g)
@@ -203,13 +203,13 @@ class ZeroPowerSGD(Optimizer):
                 correct_buf = buf / (1 - momentum**self.state[p]['steps'])
                 correct_buf += (1 - momentum) * g # Nesterov momentum
 
-                update = zeroth_power_via_newtonschulz2(correct_buf.bfloat16()).to(p.dtype)
+                update = zeroth_power_via_newtonschulz2(correct_buf)
 
                 update = update * 10
                 p.data.add_(update, alpha=-lr)
 
 def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
-    X = G / (torch.linalg.norm(G, ord='fro') + eps)
+    X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps)
     is_long = X.size(0) > X.size(1)
     if is_long:
         X = X.T
@@ -219,7 +219,7 @@ def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
         X = 2 * X - 1.5 * B + 0.5 * A @ B
     if is_long:
         X = X.T
-    return X
+    return X.to(G.dtype)
 
 # -----------------------------------------------------------------------------
 # Our own simple Distributed Data Loader
