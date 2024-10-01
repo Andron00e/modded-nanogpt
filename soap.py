@@ -21,9 +21,8 @@ class SOAP(torch.optim.Optimizer):
                 grad = p.grad
 
                 state = self.state[p]
-                
-                if "step" not in state:
-                    state["step"] = 0 
+
+                state['step'] = state.get('step', 0) + 1
                     
                 # State initialization
                 if "exp_avg" not in state:
@@ -34,7 +33,8 @@ class SOAP(torch.optim.Optimizer):
                 
                 if 'Q' not in state:
                     state['GG'] = [torch.zeros(d, d, device=grad.device) for d in grad.shape] # Will hold all the preconditioner matrices (L and R in the paper).
-                    state['Q'] = None # Will hold all the eigenbases of the preconditioner.
+                    #state['Q'] = self.get_orthogonal_matrix(state['GG'])
+                    state['Q'] = None
                     state['precondition_frequency'] = group['precondition_frequency']
                     state['shampoo_beta'] = group['shampoo_beta'] if group['shampoo_beta'] >= 0 else group["betas"][1]
                     self.update_preconditioner(grad, state)
@@ -45,8 +45,6 @@ class SOAP(torch.optim.Optimizer):
                 grad_projected = self.project(grad, state)
 
                 exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
-
-                state["step"] += 1
 
                 # Decay the first and second moment running average coefficient
                 # In-place operations to update the averages at the same time
