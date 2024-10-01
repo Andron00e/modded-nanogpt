@@ -16,7 +16,7 @@ with open(sys.argv[0]) as f:
     code = f.read()
 
 # -----------------------------------------------------------------------------
-# ZeroPowerOptimizer
+# ZeroPowerSGD
 
 @torch.compile
 def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
@@ -34,7 +34,6 @@ def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
 
 from torch.optim.optimizer import Optimizer
 class ZeroPowerSGD(Optimizer):
-
     def __init__(self, params, lr=0.02, momentum=0.9, nesterov=True):
         defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov)
         super().__init__(params, defaults)
@@ -56,13 +55,14 @@ class ZeroPowerSGD(Optimizer):
                 correct_buf.add_(g, alpha=1-momentum) # Nesterov momentum
 
                 update = zeroth_power_via_newtonschulz2(correct_buf)
+                update = update * 10
                 p.data.add_(update, alpha=-lr)
 
 class CombinedOptimizer:
 
     def __init__(self, optimizers):
+        assert all(len(opt.param_groups) == 1 for opt in optimizers)
         self.optimizers = optimizers
-        assert all(len(opt.param_groups) == 1 for opt in self.optimizers)
         self.param_groups = [pg for opt in self.optimizers for pg in opt.param_groups]
         self.base_lrs = [opt.param_groups[0]['lr'] for opt in self.optimizers]
 
@@ -76,10 +76,6 @@ class CombinedOptimizer:
 
     def state_dict(self):
         return [opt.state_dict() for opt in self.optimizers]
-
-    def update_lr(self, lr_scale):
-        for base_lr, opt in zip(self.base_lrs, self.optimizers):
-            opt.param_groups[0]['lr'] = base_lr * lr_scale
 
 # -----------------------------------------------------------------------------
 # PyTorch nn.Module definitions for the GPT-2 model
@@ -229,7 +225,7 @@ class GPT(nn.Module):
     def configure_optimizers(self, weight_decay, learning_rate, betas):
         optimizer = CombinedOptimizer([
             torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
-            ZeroPowerSGD(self.transformer.h.parameters(), lr=0.024, momentum=betas[0])
+            ZeroPowerSGD(self.transformer.h.parameters(), lr=learning_rate, momentum=betas[0])
         ])
         return optimizer
 
@@ -397,14 +393,14 @@ if __name__ == "__main__":
         assert it <= args.num_iterations
         # 1) linear warmup for warmup_iters steps
         if it < args.warmup_iters:
-            return (it+1) / args.warmup_iters
+            return args.learning_rate * (it+1) / args.warmup_iters
         # 2) constant lr for a while
         elif it < args.num_iterations - args.warmdown_iters:
-            return 1
+            return args.learning_rate
         # 3) linear warmdown
         else:
             decay_ratio = (args.num_iterations - it) / args.warmdown_iters
-            return decay_ratio
+            return args.learning_rate * decay_ratio
 
     run_id = str(uuid.uuid4())
     if master_process:
@@ -463,8 +459,9 @@ if __name__ == "__main__":
         for p in model.parameters():
             p.grad /= args.accumulation
         # determine and set the learning rate for this iteration
-        lr_scale = get_lr(step)
-        optimizer.update_lr(lr_scale)
+        lr = get_lr(step)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
         # step the optimizer
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
@@ -475,7 +472,7 @@ if __name__ == "__main__":
 
         dist.all_reduce(train_loss, op=dist.ReduceOp.AVG)
         tokens_per_second = ddp_world_size * B * T / (t1 - t0)
-        print0(f"step {step+1:4d}/{args.num_iterations} | train loss {train_loss.item():.4f} | lr_scale {lr_scale:.2e} | ({(t1-t0)*1000:.2f} ms | {tokens_per_second:.0f} tok/s)")
+        print0(f"step {step+1:4d}/{args.num_iterations} | train loss {train_loss.item():.4f} | lr {lr:.2e} | ({(t1-t0)*1000:.2f} ms | {tokens_per_second:.0f} tok/s)")
         # log training loss to logfile
         if master_process:
             with open(logfile, "a") as f:
