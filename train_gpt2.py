@@ -265,7 +265,6 @@ class Adam(Optimizer):
                 if buf2 is None:
                     buf2 = torch.zeros_like(g)
                     self.state[p]['exp_avg_sq'] = buf2
-
                 buf1.mul_(beta1).add_(g, alpha=1-beta1)
                 buf2.mul_(beta2).add_(g.square(), alpha=1-beta2)
 
@@ -274,8 +273,27 @@ class Adam(Optimizer):
                 correct_buf2 = buf2 / (1 - beta2**t)
 
                 eps = 1e-8
-                update = correct_buf1 / (eps + correct_buf2.sqrt())
+                adam_update = correct_buf1 / (eps + correct_buf2.sqrt()) # for grafting
+
+                #update = adam_update # grafting noop, should just be adam
+                #update = (correct_buf1 + 0.1 * g) / (eps + correct_buf2.sqrt()) # NAdam
+                update = zeroth_power_via_newtonschulz2(correct_buf1) # stochastic GD
+
+                update = update * (adam_update.norm() / update.norm())
                 p.data.add_(update, alpha=-lr)
+
+def zeroth_power_via_newtonschulz2(G, steps=15, eps=1e-7):
+    X = G / (torch.linalg.norm(G, ord='fro') + eps)
+    is_long = X.size(0) > X.size(1)
+    if is_long:
+        X = X.T
+    for _ in range(steps):
+        A = X @ X.T
+        B = A @ X
+        X = 2 * X - 1.5 * B + 0.5 * A @ B
+    if is_long:
+        X = X.T
+    return X
 
 # -----------------------------------------------------------------------------
 # int main
