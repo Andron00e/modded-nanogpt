@@ -160,11 +160,9 @@ class GPT(nn.Module):
         return logits, loss
 
     def configure_optimizers(self, weight_decay, learning_rate, betas):
-        #optimizer = torch.optim.AdamW(self.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=betas)
-        #optimizer = Adam(self.parameters(), lr=learning_rate, betas=betas)
         optimizer = CombinedOptimizer([
-            torch.optim.AdamW([self.lm_head.weight], lr=learning_rate, betas=betas, weight_decay=0),
-            Adam(self.transformer.h.parameters(), lr=learning_rate, betas=betas)
+            torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
+            ZeroPowerSGD(self.transformer.h.parameters(), lr=learning_rate, betas=betas)
         ])
         return optimizer
 
@@ -258,7 +256,7 @@ class DistributedDataLoader:
 
 
 from torch.optim.optimizer import Optimizer
-class Adam(Optimizer):
+class ZeroPowerSGD(Optimizer):
     def __init__(self, params, lr=0.0018, betas=(0.9, 0.95)):
         defaults = dict(lr=lr, betas=betas)
         super().__init__(params, defaults)
@@ -274,23 +272,9 @@ class Adam(Optimizer):
                 if g is None:
                     continue
 
-                buf1 = self.state[p].get('exp_avg')
-                buf2 = self.state[p].get('exp_avg_sq')
-                if buf1 is None:
-                    buf1 = torch.zeros_like(g)
-                    self.state[p]['exp_avg'] = buf1
-                if buf2 is None:
-                    buf2 = torch.zeros_like(g)
-                    self.state[p]['exp_avg_sq'] = buf2
-                buf1.mul_(beta1).add_(g, alpha=1-beta1)
-                buf2.mul_(beta2).add_(g.square(), alpha=1-beta2)
-
                 t = self.steps
-                correct_buf1 = buf1 / (1 - beta1**t)
-                correct_buf2 = buf2 / (1 - beta2**t)
 
                 eps = 1e-8
-                adam_update = correct_buf1 / (eps + correct_buf2.sqrt()) # for grafting
 
                 beta3 = 0.9 # same as Adam momentum seems to be good here
                 buf3 = self.state[p].get('exp_avg3')
@@ -301,13 +285,9 @@ class Adam(Optimizer):
                 correct_buf3 = buf3 / (1 - beta3**t)
                 correct_buf3 += (1 - beta3) * g # Nesterov momentum
 
-                #update = adam_update # grafting noop, should just be adam
-                #update = (correct_buf1 + 0.1 * g) / (eps + correct_buf2.sqrt()) # NAdam
-                #update = zeroth_power_via_newtonschulz2(correct_buf1) # spectral GD
-                #update = zeroth_power_via_newtonschulz2(correct_buf3) # spectral GD
-                update = zeroth_power_via_newtonschulz2(correct_buf3.bfloat16()).to(adam_update.dtype)
+                update = zeroth_power_via_newtonschulz2(correct_buf3.bfloat16()).to(p.dtype)
 
-                update = update * (adam_update.norm() / update.norm())
+                update = update * 10
                 p.data.add_(update, alpha=-lr)
 
 def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
