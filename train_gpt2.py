@@ -162,7 +162,7 @@ class GPT(nn.Module):
     def configure_optimizers(self, weight_decay, learning_rate, betas):
         optimizer = CombinedOptimizer([
             torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
-            ZeroPowerSGD(self.transformer.h.parameters(), lr=learning_rate, momentum=0.9, nesterov=True)
+            ZeroPowerSGD(self.transformer.h.parameters(), lr=10*learning_rate, momentum=betas[0], nesterov=True)
         ])
         return optimizer
 
@@ -281,7 +281,6 @@ class ZeroPowerSGD(Optimizer):
                     correct_buf += (1 - momentum) * g # Nesterov momentum
 
                 update = zeroth_power_via_newtonschulz2(correct_buf)
-                update = update * 10
                 p.data.add_(update, alpha=-lr)
 
 @torch.compile
