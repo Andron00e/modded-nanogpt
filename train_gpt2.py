@@ -57,10 +57,9 @@ class SpectralSGDM(torch.optim.Optimizer):
                 if 'momentum_buffer' not in state:
                     state['momentum_buffer'] = torch.zeros_like(g)
                 buf = state['momentum_buffer']
-                buf.lerp_(g, 1-momentum)
-                correct_buf = buf / (1 - momentum**state['steps'])
-                correct_buf.add_(g, alpha=1-momentum) # Nesterov momentum
-                update = zeroth_power_via_newtonschulz2(correct_buf)
+                buf.mul_(momentum).add_(g)
+                g = g.add(buf, alpha=momentum) if group['nesterov'] else buf
+                update = zeroth_power_via_newtonschulz2(g)
                 p.data.add_(update, alpha=-lr)
 
 class CombinedOptimizer:
