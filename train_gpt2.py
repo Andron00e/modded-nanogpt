@@ -16,10 +16,18 @@ with open(sys.argv[0]) as f:
     code = f.read()
 
 # -----------------------------------------------------------------------------
-# ZeroPowerSGD
+# SpectralSGDM
 
 @torch.compile
 def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
+    """
+    Newton-Schulz iteration to compute the zeroth power / orthogonalization of G.
+
+    Bernstein & Newhouse (2024) https://arxiv.org/abs/2409.20325 suggest Newton-Schulz as a way to
+    compute Shampoo's preconditioners. The below code runs the second-order Newton-Schulz iteration
+    (or fifth-order depending on how you count), which seems to be optimal for our purpose.
+    """
+    assert len(G.shape) == 2
     X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps) # ensure top singular value <= 1
     if G.size(0) > G.size(1):
         X = X.T
@@ -31,8 +39,7 @@ def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
         X = X.T
     return X.to(G.dtype)
 
-from torch.optim.optimizer import Optimizer
-class ZeroPowerSGD(Optimizer):
+class SpectralSGDM(torch.optim.Optimizer):
     def __init__(self, params, lr=0.02, momentum=0.9, nesterov=True):
         defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov)
         super().__init__(params, defaults)
@@ -41,18 +48,18 @@ class ZeroPowerSGD(Optimizer):
         for group in self.param_groups:
             lr = group['lr']
             momentum = group['momentum']
-            for i, p in enumerate(group['params']):
+            for p in group['params']:
                 g = p.grad
                 if g is None:
                     continue
-                self.state[p]['steps'] = self.state[p].get('steps', 0) + 1 
-                if 'exp_avg' not in self.state[p]:
-                    self.state[p]['exp_avg'] = torch.zeros_like(g)
-                buf = self.state[p]['exp_avg']
+                state = self.state[p]
+                state['steps'] = state.get('steps', 0) + 1
+                if 'momentum_buffer' not in state:
+                    state['momentum_buffer'] = torch.zeros_like(g)
+                buf = state['momentum_buffer']
                 buf.lerp_(g, 1-momentum)
-                correct_buf = buf / (1 - momentum**self.state[p]['steps'])
+                correct_buf = buf / (1 - momentum**state['steps'])
                 correct_buf.add_(g, alpha=1-momentum) # Nesterov momentum
-
                 update = zeroth_power_via_newtonschulz2(correct_buf)
                 p.data.add_(update, alpha=-lr)
 
@@ -227,8 +234,7 @@ class GPT(nn.Module):
     def configure_optimizers(self, weight_decay, learning_rate, betas):
         optimizer = CombinedOptimizer([
             torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
-            ZeroPowerSGD(self.transformer.h.parameters(), lr=10 * learning_rate, momentum=0.9),
-            #torch.optim.AdamW(self.transformer.h.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
+            SpectralSGDM(self.transformer.h.parameters(), lr=10 * learning_rate, momentum=0.90)
         ])
         return optimizer
 
@@ -361,7 +367,7 @@ if __name__ == "__main__":
     # load tokens
     train_loader = DistributedDataLoader(args.input_bin, B, T, ddp_rank, ddp_world_size)
     print0(f"Training DataLoader: total number of tokens: {train_loader.ntok_total} across {len(train_loader.files)} files")
-    val_loader = DistributedDataLoader(args.input_val_bin, 32, T, ddp_rank, ddp_world_size)
+    val_loader = DistributedDataLoader(args.input_val_bin, B, T, ddp_rank, ddp_world_size)
     print0(f"Validation DataLoader: total number of tokens: {val_loader.ntok_total} across {len(val_loader.files)} files")
     x, y = train_loader.next_batch()
 
