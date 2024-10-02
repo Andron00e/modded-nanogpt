@@ -233,7 +233,7 @@ class GPT(nn.Module):
     def configure_optimizers(self, weight_decay, learning_rate, betas):
         optimizer = CombinedOptimizer([
             torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
-            SpectralSGDM(self.transformer.h.parameters(), lr=10 * learning_rate, momentum=0.90)
+            SpectralSGDM(self.transformer.h.parameters(), lr=10 * learning_rate, momentum=0.95)
         ])
         return optimizer
 
