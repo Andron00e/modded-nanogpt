@@ -20,7 +20,7 @@ with open(sys.argv[0]) as f:
 # SpectralSGDM
 
 # @torch.compile # I want to compile this but sometimes it causes an error
-def spectral_norm(G, steps=10, eps=1e-7):
+def spectral_norm(G, steps=20, eps=1e-7):
     X = G.bfloat16() / (G.norm() + eps)
     if G.size(0) > G.size(1):
         X = X.T
@@ -39,13 +39,11 @@ def zeroth_power_via_newtonschulz2(G, steps=3, eps=1e-7):
     compute Shampoo's preconditioners. The below code runs the second-order Newton-Schulz iteration
     (or fifth-order depending on how you count), which seems to be optimal for our purpose.
     """
-
-    a, b, c = (3.4445, -4.7750,  2.0315) # good for 3 steps - actually this seems good for everything
+    assert len(G.shape) == 2
+    a, b, c = (3.4445, -4.7750,  2.0315) # good for 3 steps - actually this seems good for everythin
     #a, b, c = (3.1866, -4.4189,  2.1207) # good for 4 steps
     #a, b, c = (2.613, -3.2274, 1.6137) # find for more steps than that
-
-    assert len(G.shape) == 2
-    X = G.bfloat16() / (spectral_norm(G) + eps) # ensure top singular value <= 1
+    X = 0.9 * G.bfloat16() / (spectral_norm(G) + eps) # ensure top singular value <= 1
     if G.size(0) > G.size(1):
         X = X.T
     for _ in range(steps):
