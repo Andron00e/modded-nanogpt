@@ -20,54 +20,7 @@ with open(sys.argv[0]) as f:
 # SpectralSGDM
 
 @torch.compile
-def zeroth_power_via_newtonschulz3(G, steps=2, eps=1e-7):
-
-    #a, b, c, d = (3, -3, 1.33, -0.2)
-    #a, b, c, d = (4, -4, 1.59, -0.2)
-    #a, b, c, d = (5.5, -5.5, 1.9, -0.2)
-    #a, b, c, d = (4, -6.5, 4.12, -0.8)
-    #a, b, c, d = (4.5, -11, 11, -3.65)
-    #a, b, c, d = (4.5, -13, 16, -6.4)
-
-    #a, b, c, d = (4.5, -14, 18.5, -8) # very good
-    #a, b, c, d = (4.6666, -13.8124,  16.7925,  -6.5402)
-    #a, b, c, d = (3.9022, -11.1976,  15.2663,  -7.1203) # maybe optimal for 2 steps
-    #a, b, c, d = [  4.0749, -12.7034,  18.0792,  -8.5816] # test - should cause deviation 0.07
-    #a, b, c, d = [  4.2967, -13.3190,  18.3168,  -8.3119] # test - should cause deviation 0.154
-    #a, b, c, d = [  4.5392, -14.0764,  18.5246,  -7.9089] # test - should cause deviation 0.25
-    #a, b, c, d = [  4.5627, -14.0681,  18.5225,  -7.9187] # dev test 0.41
-    #a, b, c, d = [  4.6209, -14.0258,  18.5034,  -7.9797] # dev test 0.7840
-
-    # quintics for steps=3
-    #a, b, c, d = [ 3.2035, -4.5054,  2.1267, 0 ] # thinking outside the box - 1.36x
-    #a, b, c, d = [ 3.4445, -4.7750,  2.0315, 0 ] # even noisier - 1.76x
-    #a, b, c, d = [ 3.6259, -4.6927,  1.8293, 0 ] # even noisier - 1.81x
-    #a, b, c, d = [ 3.7608, -4.1631,  1.3318, 0 ] # noisier - 2.3x
-
-    #a, b, c, d = (4.4520, -12.9232,  15.5527,  -6.1344) # optimized? - dev ratio 1.457 at steps=2
-    #a, b, c, d = (5.0076, -15.4502,  18.4866,  -6.8907) # dev 1.85x at steps=2
-    a, b, c, d = (4.6920, -13.2829,  15.3946,  -5.6965) # dev 1.44 at steps=2
-
-    a, b, c, d = (3.1866, -4.4189,  2.1207, 0) # dev 1.24 at steps=4
-
-    #a, b, c, d = (2.613724795414073, -3.2274495908281464, 1.6137247954140732, 0) # quintic as a sanity check
-
-    assert len(G.shape) == 2
-    X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps) # ensure top singular value <= 1
-    if G.size(0) > G.size(1):
-        X = X.T
-    for _ in range(steps):
-        A = X @ X.T
-        B = A @ X
-        C = A @ B
-        D = A @ C
-        X = a * X + b * B + c * C + d * D
-    if G.size(0) > G.size(1):
-        X = X.T
-    return X.to(G.dtype)
-
-@torch.compile
-def zeroth_power_via_newtonschulz2(G, steps=4, eps=1e-7):
+def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G.
 
@@ -76,10 +29,8 @@ def zeroth_power_via_newtonschulz2(G, steps=4, eps=1e-7):
     (or fifth-order depending on how you count), which seems to be optimal for our purpose.
     """
 
-    #a, b, c = (2, 1.5, 0.5) # naive coefficients
-    c = (-107 + 51 * 17**0.5) / 64
-    a = 1+c
-    b = 2*c
+    a, b, c = (2.614, -3.227, 1.614)
+    #a, b, c = (3.187, -4.419,  2.121)
 
     assert len(G.shape) == 2
     X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps) # ensure top singular value <= 1
@@ -113,8 +64,7 @@ class SpectralSGDM(torch.optim.Optimizer):
                 buf = state['momentum_buffer']
                 buf.mul_(momentum).add_(g)
                 g = g.add(buf, alpha=momentum) if group['nesterov'] else buf
-                #update = zeroth_power_via_newtonschulz2(g)
-                update = zeroth_power_via_newtonschulz3(g)
+                update = zeroth_power_via_newtonschulz2(g)
                 p.data.add_(update, alpha=-lr)
 
 class CombinedOptimizer:
