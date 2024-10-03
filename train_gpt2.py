@@ -19,7 +19,7 @@ with open(sys.argv[0]) as f:
 # -----------------------------------------------------------------------------
 # SpectralSGDM
 
-@torch.compile
+# @torch.compile # I want to compile this but sometimes it causes an error
 def spectral_norm(G, steps=10, eps=1e-7):
     X = G.bfloat16() / (G.norm() + eps)
     if G.size(0) > G.size(1):
