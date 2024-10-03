@@ -20,7 +20,7 @@ with open(sys.argv[0]) as f:
 # SpectralSGDM
 
 @torch.compile
-def zeroth_power_via_newtonschulz2(G, steps=7, eps=1e-7):
+def zeroth_power_via_newtonschulz2(G, steps=4, eps=1e-7):
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G.
 
@@ -29,11 +29,11 @@ def zeroth_power_via_newtonschulz2(G, steps=7, eps=1e-7):
     (or fifth-order depending on how you count), which seems to be optimal for our purpose.
     """
 
-    #c = (-107 + 51 * 17**0.5) / 64
-    #a = 1+c
-    #b = 2*c
+    c = (-107 + 51 * 17**0.5) / 64
+    a = 1+c
+    b = 2*c
 
-    a, b, c = (2, 1.5, 0.5)
+    #a, b, c = (2, 1.5, 0.5)
 
     assert len(G.shape) == 2
     X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps) # ensure top singular value <= 1
