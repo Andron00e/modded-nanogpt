@@ -186,10 +186,16 @@ class Block(nn.Module):
         super().__init__()
         d = config.n_embd
         #self.fc1 = nn.Linear(d, 7*d, bias=False)
-        self.fc1a = nn.Linear(d, 3*d, bias=False)
-        self.fc1b = nn.Linear(d, 4*d, bias=False)
-        self.fc2 = nn.Linear(d, d, bias=False)
-        self.fc3 = nn.Linear(4*d, d, bias=False)
+        self.fc1a = nn.Linear(d, d, bias=False)
+        self.fc1b = nn.Linear(d, d, bias=False)
+        self.fc1c = nn.Linear(d, d, bias=False)
+        #self.fc2 = nn.Linear(d, 4*d, bias=False)
+        self.fc2a = nn.Linear(d, d, bias=False)
+        self.fc2b = nn.Linear(d, d, bias=False)
+        self.fc2c = nn.Linear(d, d, bias=False)
+        self.fc2d = nn.Linear(d, d, bias=False)
+        self.fc3 = nn.Linear(d, d, bias=False)
+        self.fc4 = nn.Linear(4*d, d, bias=False)
         self.attn_scale = (1 / (2 * config.n_layer)**0.5)
         self.n_head = config.n_head
         self.n_embd = config.n_embd
@@ -201,9 +207,12 @@ class Block(nn.Module):
     def attn(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        qkv = F.linear(x, self.fc1a.weight)
-        #qkv = F.linear(x, self.fc1a.weight[:3*self.d])
-        q, k, v = qkv.split(self.n_embd, dim=2)
+        #qkv = F.linear(x, self.fc1a.weight)
+        #qkv = F.linear(x, self.fc1.weight[:3*self.d])
+        #q, k, v = qkv.split(self.n_embd, dim=2)
+        q = self.fc1a(x)
+        k = self.fc1b(x)
+        v = self.fc1c(x)
         k = k.view(B, T, self.n_head, self.head_dim)
         q = q.view(B, T, self.n_head, self.head_dim)
         v = v.view(B, T, self.n_head, self.head_dim)
@@ -213,14 +222,14 @@ class Block(nn.Module):
         y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=True)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
         # output projection
-        y = self.fc2(y)
+        y = self.fc3(y)
         return y
 
     def mlp(self, x):
-        x = F.linear(x, self.fc1b.weight)
+        x = F.linear(x, torch.cat([self.fc2a.weight, self.fc2b.weight, self.fc2c.weight, self.fc2d.weight]))
         #x = F.linear(x, self.fc1.weight[3*self.d:])
         x = F.gelu(x)
-        x = self.fc3(x)
+        x = self.fc4(x)
         return x
 
     def forward(self, x):
