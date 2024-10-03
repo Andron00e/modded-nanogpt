@@ -20,7 +20,7 @@ with open(sys.argv[0]) as f:
 # SpectralSGDM
 
 @torch.compile
-def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
+def zeroth_power_via_newtonschulz2(G, steps=7, eps=1e-7):
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G.
 
@@ -28,6 +28,13 @@ def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
     compute Shampoo's preconditioners. The below code runs the second-order Newton-Schulz iteration
     (or fifth-order depending on how you count), which seems to be optimal for our purpose.
     """
+
+    #c = (-107 + 51 * 17**0.5) / 64
+    #a = 1+c
+    #b = 2*c
+
+    a, b, c = (2, 1.5, 0.5)
+
     assert len(G.shape) == 2
     X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps) # ensure top singular value <= 1
     if G.size(0) > G.size(1):
@@ -35,7 +42,7 @@ def zeroth_power_via_newtonschulz2(G, steps=9, eps=1e-7):
     for _ in range(steps):
         A = X @ X.T
         B = A @ X
-        X = 2 * X - 1.5 * B + 0.5 * A @ B
+        X = a * X - b * B + c * A @ B
     if G.size(0) > G.size(1):
         X = X.T
     return X.to(G.dtype)
