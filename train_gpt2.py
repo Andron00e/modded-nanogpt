@@ -167,13 +167,61 @@ class MLP(nn.Module):
         x = self.c_proj(x)
         return x
 
-class Block(nn.Module):
+class BlockOld(nn.Module):
 
     def __init__(self, config):
         super().__init__()
         self.attn = CausalSelfAttention(config)
         self.mlp = MLP(config)
         self.attn_scale = (1 / (2 * config.n_layer)**0.5)
+
+    def forward(self, x):
+        x = x + self.attn_scale * self.attn(rmsnorm(x))
+        x = x + self.mlp(rmsnorm(x))
+        return x
+
+class Block(nn.Module):
+
+    def __init__(self, config):
+        super().__init__()
+        d = config.n_embd
+        #self.fc1 = nn.Linear(d, 7*d, bias=False)
+        self.fc1a = nn.Linear(d, 3*d, bias=False)
+        self.fc1b = nn.Linear(d, 4*d, bias=False)
+        self.fc2 = nn.Linear(d, d, bias=False)
+        self.fc3 = nn.Linear(4*d, d, bias=False)
+        self.attn_scale = (1 / (2 * config.n_layer)**0.5)
+        self.n_head = config.n_head
+        self.n_embd = config.n_embd
+        self.head_dim = self.n_embd // self.n_head
+        assert self.n_embd % self.n_head == 0
+        self.d = d
+        self.rotary = Rotary(self.head_dim)
+
+    def attn(self, x):
+        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        qkv = F.linear(x, self.fc1a.weight)
+        #qkv = F.linear(x, self.fc1a.weight[:3*self.d])
+        q, k, v = qkv.split(self.n_embd, dim=2)
+        k = k.view(B, T, self.n_head, self.head_dim)
+        q = q.view(B, T, self.n_head, self.head_dim)
+        v = v.view(B, T, self.n_head, self.head_dim)
+        cos, sin = self.rotary(q)
+        q = apply_rotary_emb(q, cos, sin)
+        k = apply_rotary_emb(k, cos, sin)
+        y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=True)
+        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+        # output projection
+        y = self.fc2(y)
+        return y
+
+    def mlp(self, x):
+        x = F.linear(x, self.fc1b.weight)
+        #x = F.linear(x, self.fc1.weight[3*self.d:])
+        x = F.gelu(x)
+        x = self.fc3(x)
+        return x
 
     def forward(self, x):
         x = x + self.attn_scale * self.attn(rmsnorm(x))
