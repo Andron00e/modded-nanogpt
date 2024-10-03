@@ -22,7 +22,8 @@ with open(sys.argv[0]) as f:
 @torch.compile
 def zeroth_power_via_newtonschulz3(G, steps=3, eps=1e-7):
 
-    a, b, c, d = (3, -3, 1.33, -0.2)
+    #a, b, c, d = (3, -3, 1.33, -0.2)
+    a, b, c, d = (4, -4, 1.59, -0.2)
     #a, b, c, d = (2.613724795414073, 3.2274495908281464, 1.6137247954140732, 0) # quintic as a sanity check
 
     assert len(G.shape) == 2
