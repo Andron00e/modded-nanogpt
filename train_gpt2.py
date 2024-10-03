@@ -1,5 +1,6 @@
 import os
 import sys
+print(sys.version)
 import uuid
 import glob
 from dataclasses import dataclass
@@ -231,9 +232,29 @@ class GPT(nn.Module):
         return logits, loss
 
     def configure_optimizers(self, weight_decay, learning_rate, betas):
+
+        if False:
+            from distributed_shampoo.distributed_shampoo import DistributedShampoo
+            from distributed_shampoo.shampoo_types import AdamGraftingConfig
+            shampoo = DistributedShampoo(
+                self.transformer.h.parameters(),
+                lr=0.5*learning_rate,
+                betas=(0.9, 0.99),
+                epsilon=1e-9,
+                #weight_decay=0, # default 0
+                max_preconditioner_dim=8192,
+                precondition_frequency=5,
+                #use_decoupled_weight_decay=True,
+                grafting_config=AdamGraftingConfig(
+                    beta2=0.98,
+                    epsilon=1e-9,
+                ),
+            )
+
         optimizer = CombinedOptimizer([
             torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
             SpectralSGDM(self.transformer.h.parameters(), lr=10 * learning_rate, momentum=0.95)
+            #shampoo,
         ])
         return optimizer
 
