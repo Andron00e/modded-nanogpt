@@ -25,14 +25,13 @@ def spectral_norm(G, steps=10, eps=1e-7):
     if G.size(0) > G.size(1):
         X = X.T
     M = X @ X.T
-    v = torch.randn(X.size(0), 1, device=X.device, dtype=X.dtype)
+    v = torch.randn(X.size(0), device=X.device, dtype=X.dtype)
     for _ in range(steps):
-        v = v / v.norm()
-        v = M @ v
+        v = M @ (v / v.norm())
     return G.norm() * v.norm()**0.5
 
 @torch.compile
-def zeroth_power_via_newtonschulz2(G, steps=2, eps=1e-7):
+def zeroth_power_via_newtonschulz2(G, steps=3, eps=1e-7):
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G.
 
