@@ -20,7 +20,19 @@ with open(sys.argv[0]) as f:
 # SpectralSGDM
 
 @torch.compile
-def zeroth_power_via_newtonschulz2(G, steps=3, eps=1e-7):
+def spectral_norm(G, steps=10, eps=1e-7):
+    X = G.bfloat16() / (G.norm() + eps)
+    if G.size(0) > G.size(1):
+        X = X.T
+    M = X @ X.T
+    v = torch.randn(X.size(0), 1, device=X.device, dtype=X.dtype)
+    for _ in range(steps):
+        v = v / v.norm()
+        v = M @ v
+    return G.norm() * v.norm()**0.5
+
+@torch.compile
+def zeroth_power_via_newtonschulz2(G, steps=2, eps=1e-7):
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G.
 
@@ -34,7 +46,7 @@ def zeroth_power_via_newtonschulz2(G, steps=3, eps=1e-7):
     #a, b, c = (2.613, -3.2274, 1.6137) # find for more steps than that
 
     assert len(G.shape) == 2
-    X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps) # ensure top singular value <= 1
+    X = G.bfloat16() / (spectral_norm(G) + eps) # ensure top singular value <= 1
     if G.size(0) > G.size(1):
         X = X.T
     for _ in range(steps):
