@@ -27,7 +27,7 @@ def zeroth_power_via_newtonschulz3(G, steps=9, eps=1e-7):
     c = a/3
     d = -0.24
 
-    a, b, c = (2.613724795414073, 3.2274495908281464, 1.6137247954140732) # quintic as a sanity check
+    a, b, c, d = (2.613724795414073, 3.2274495908281464, 1.6137247954140732, 0) # quintic as a sanity check
 
     assert len(G.shape) == 2
     X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps) # ensure top singular value <= 1
@@ -38,7 +38,7 @@ def zeroth_power_via_newtonschulz3(G, steps=9, eps=1e-7):
         B = A @ X
         C = A @ B
         D = A @ C
-        X = a * X + b * B + c * C + d * D
+        X = a * X - b * B + c * C + d * D
     if G.size(0) > G.size(1):
         X = X.T
     return X.to(G.dtype)
