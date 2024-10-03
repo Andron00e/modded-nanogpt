@@ -29,9 +29,9 @@ def zeroth_power_via_newtonschulz2(G, steps=3, eps=1e-7):
     (or fifth-order depending on how you count), which seems to be optimal for our purpose.
     """
 
-    a, b, c = (3.4445, -4.7750,  2.0315) # good for 3 steps
+    a, b, c = (3.4445, -4.7750,  2.0315) # good for 3 steps - actually this seems good for everything
     #a, b, c = (3.1866, -4.4189,  2.1207) # good for 4 steps
-    #a, b, c = (2.614, -3.227, 1.614) # find for more steps than that
+    #a, b, c = (2.613, -3.2274, 1.6137) # find for more steps than that
 
     assert len(G.shape) == 2
     X = G.bfloat16() / (torch.linalg.norm(G, ord='fro') + eps) # ensure top singular value <= 1
