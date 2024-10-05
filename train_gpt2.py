@@ -302,8 +302,8 @@ class GPT(nn.Module):
             )
 
         optimizer = CombinedOptimizer([
-            #torch.optim.AdamW(self.lm_head.parameters(), lr=2*learning_rate, betas=(0.9, 0.95), weight_decay=0),
-            Adafactor(self.transformer.wte.parameters(), lr=2 * learning_rate, momentum=0.90),
+            torch.optim.AdamW(self.lm_head.parameters(), lr=2*learning_rate, betas=(0.9, 0.99), weight_decay=0),
+            #Adafactor(self.transformer.wte.parameters(), lr=2 * learning_rate, momentum=0.90),
             SpectralSGDM(self.transformer.h.parameters(), lr=0.2 * learning_rate, momentum=0.95)
             #shampoo,
         ])
@@ -473,7 +473,8 @@ if __name__ == "__main__":
         assert it <= args.num_iterations
         # 1) linear warmup for warmup_iters steps
         if it < args.warmup_iters:
-            return (it+1) / args.warmup_iters
+            #return (it+1) / args.warmup_iters
+            return 1.0
         # 2) constant lr for a while
         elif it < args.num_iterations - args.warmdown_iters:
             return 1.0
