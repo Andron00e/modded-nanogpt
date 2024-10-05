@@ -31,7 +31,7 @@ def spectral_norm(G, steps=20, eps=1e-7):
     return G.norm() * v.norm()**0.5
 
 @torch.compile
-def zeroth_power_via_newtonschulz2(G, steps=7, eps=1e-7):
+def zeroth_power_via_newtonschulz5(G, steps=7, eps=1e-7):
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G.
 
@@ -75,7 +75,7 @@ class SpectralSGDM(torch.optim.Optimizer):
                 buf = state['momentum_buffer']
                 buf.mul_(momentum).add_(g)
                 g = g.add(buf, alpha=momentum) if group['nesterov'] else buf
-                update = zeroth_power_via_newtonschulz2(g)
+                update = zeroth_power_via_newtonschulz5(g)
                 scale = update.numel()**0.5 / update.norm()
                 #print(10 * lr * update.norm(), lr * scale * update.norm())
                 p.data.add_(update, alpha=-lr * scale)
