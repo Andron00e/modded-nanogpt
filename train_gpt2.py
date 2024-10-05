@@ -98,17 +98,17 @@ class Adafactor(torch.optim.Optimizer):
         state['steps'] = state.get('steps', 0) + 1
         if 'momentum_buffer' not in state:
             state['momentum_buffer'] = torch.zeros_like(g)
-            state['momentum_buffer2'] = torch.zeros_like(g[0])
-            state['momentum_buffer3'] = torch.zeros_like(g[:, 0])
+            state['momentum_buffer2'] = torch.zeros_like(g[:, 0])
+            state['momentum_buffer3'] = torch.zeros_like(g[0])
         buf = state['momentum_buffer']
         buf2 = state['momentum_buffer2']
         buf3 = state['momentum_buffer3']
         buf.lerp_(g, 1-momentum)
         beta2 = 0.99
-        buf2.lerp_(g.square().mean(1), 1-beta2)
-        buf3.lerp_(g.square().mean(0), 1-beta2)
+        buf2.lerp_(g.square().sum(1), 1-beta2)
+        buf3.lerp_(g.square().sum(0), 1-beta2)
         numer = buf / (1 - momentum**state['steps'])
-        denom = torch.outer(buf2, buf3) / (1 - beta2**state['steps'])
+        denom = torch.outer(buf2, buf3) / ((1 - beta2**state['steps']) * buf3.sum())
         eps = 1e-7
         update = numer / (eps + denom.sqrt())
         p.data.add_(update, alpha=-lr)
@@ -302,7 +302,7 @@ class GPT(nn.Module):
             )
 
         optimizer = CombinedOptimizer([
-            #torch.optim.AdamW(self.lm_head.parameters(), lr=2*learning_rate, betas=betas, weight_decay=0),
+            #torch.optim.AdamW(self.lm_head.parameters(), lr=2*learning_rate, betas=(0.9, 0.95), weight_decay=0),
             Adafactor(self.transformer.wte.parameters(), lr=2 * learning_rate, momentum=0.90),
             SpectralSGDM(self.transformer.h.parameters(), lr=0.2 * learning_rate, momentum=0.95)
             #shampoo,
