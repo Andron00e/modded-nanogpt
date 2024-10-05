@@ -108,7 +108,7 @@ class Adafactor(torch.optim.Optimizer):
         buf2.lerp_(g.square().sum(1), 1-beta2)
         buf3.lerp_(g.square().sum(0), 1-beta2)
         numer = buf / (1 - momentum**state['steps'])
-        denom = torch.outer(buf2, buf3) / ((1 - beta2**state['steps']) * buf3.sum())
+        denom = torch.outer(buf2, buf3) / ((1 - beta2**state['steps'])**2 * buf3.sum())
         eps = 1e-7
         update = numer / (eps + denom.sqrt())
         p.data.add_(update, alpha=-lr)
