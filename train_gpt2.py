@@ -84,14 +84,14 @@ class EmbeddingOptimizer(torch.optim.Optimizer):
     def __init__(self, params, lr, momentum):
         super().__init__(params, dict(lr=lr, momentum=momentum))
         assert len(self.param_groups) == 1
-        assert len(self.param_groups[0]) == 1
+        assert len(self.param_groups[0]['params']) == 1
 
     def step(self):
         group = self.param_groups[0]
         p = group['params'][0]
         g = p.grad
         if g is None:
-            continue
+            return
         state = self.state[p]
         if 'momentum_buffer' not in state:
             state['momentum_buffer'] = torch.zeros_like(g)
