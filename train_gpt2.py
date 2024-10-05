@@ -31,7 +31,7 @@ def spectral_norm(G, steps=20, eps=1e-7):
     return G.norm() * v.norm()**0.5
 
 @torch.compile
-def zeroth_power_via_newtonschulz2(G, steps=3, eps=1e-7):
+def zeroth_power_via_newtonschulz2(G, steps=7, eps=1e-7):
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G.
 
@@ -43,7 +43,8 @@ def zeroth_power_via_newtonschulz2(G, steps=3, eps=1e-7):
     a, b, c = (3.4445, -4.7750,  2.0315) # good for 3 steps - actually this seems good for everythin
     #a, b, c = (3.1866, -4.4189,  2.1207) # good for 4 steps
     #a, b, c = (2.613, -3.2274, 1.6137) # find for more steps than that
-    X = 0.9 * G.bfloat16() / (spectral_norm(G) + eps) # ensure top singular value <= 1
+    #X = 0.9 * G.bfloat16() / (spectral_norm(G) + eps) # ensure top singular value <= 1
+    X = G.bfloat16() / (G.norm() + eps) # ensure top singular value <= 1
     if G.size(0) > G.size(1):
         X = X.T
     for _ in range(steps):
@@ -75,7 +76,8 @@ class SpectralSGDM(torch.optim.Optimizer):
                 buf.mul_(momentum).add_(g)
                 g = g.add(buf, alpha=momentum) if group['nesterov'] else buf
                 update = zeroth_power_via_newtonschulz2(g)
-                p.data.add_(update, alpha=-lr)
+                scale = update.numel()**0.5 / update.norm()
+                p.data.add_(update, alpha=-lr * scale)
 
 class CombinedOptimizer:
 
@@ -267,7 +269,7 @@ class GPT(nn.Module):
 
         optimizer = CombinedOptimizer([
             torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
-            SpectralSGDM(self.transformer.h.parameters(), lr=10 * learning_rate, momentum=0.95)
+            SpectralSGDM(self.transformer.h.parameters(), lr=learning_rate, momentum=0.95)
             #shampoo,
         ])
         return optimizer
