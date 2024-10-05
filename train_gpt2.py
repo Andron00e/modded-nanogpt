@@ -79,7 +79,7 @@ class SpectralSGDM(torch.optim.Optimizer):
                 #print(10 * lr * update.norm(), lr * scale * update.norm())
                 p.data.add_(update, alpha=-lr * scale)
 
-class EmbeddingOptimizer(torch.optim.Optimizer):
+class Adafactor(torch.optim.Optimizer):
 
     def __init__(self, params, lr, momentum, nesterov=False):
         super().__init__(params, dict(lr=lr, momentum=momentum, nesterov=nesterov))
@@ -101,16 +101,15 @@ class EmbeddingOptimizer(torch.optim.Optimizer):
             state['momentum_buffer2'] = torch.zeros_like(g)
         buf = state['momentum_buffer']
         buf2 = state['momentum_buffer2']
-        #buf.mul_(momentum).add_(g)
         buf.lerp_(g, 1-momentum)
         buf2.lerp_(g.square(), 0.01)
         numer = buf / (1 - momentum**state['steps'])
         denom = buf2 / (1 - 0.99**state['steps'])
 
-        #update = g.add(buf, alpha=momentum) if group['nesterov'] else buf
-        #update *= (update.size(1)**0.5 / update.norm(dim=1, keepdim=True)) # Make each embedding's update have MSE 1
         eps = 1e-7
-        p.data.add_(numer / (eps + denom.sqrt()), alpha=-lr)
+        denom = (denom.log().mean(0, keepdim=True) + denom.log().mean(1, keepdim=True) - denom.log().mean()).exp()
+        update = numer / (eps + denom.sqrt())
+        p.data.add_(update, alpha=-lr)
 
 class CombinedOptimizer:
 
@@ -302,7 +301,7 @@ class GPT(nn.Module):
 
         optimizer = CombinedOptimizer([
             #torch.optim.AdamW(self.lm_head.parameters(), lr=2*learning_rate, betas=betas, weight_decay=0),
-            EmbeddingOptimizer(self.transformer.wte.parameters(), lr=2 * learning_rate, momentum=0.90),
+            Adafactor(self.transformer.wte.parameters(), lr=2 * learning_rate, momentum=0.90),
             SpectralSGDM(self.transformer.h.parameters(), lr=0.2 * learning_rate, momentum=0.95)
             #shampoo,
         ])
