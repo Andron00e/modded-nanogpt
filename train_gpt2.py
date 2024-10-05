@@ -75,8 +75,7 @@ class SpectralSGDM(torch.optim.Optimizer):
                 buf.mul_(momentum).add_(g)
                 g = g.add(buf, alpha=momentum) if group['nesterov'] else buf
                 update = zeroth_power_via_newtonschulz5(g)
-                scale = update.numel()**0.5 / update.norm() # make the MSE of the update equal to one
-                #print(10 * lr * update.norm(), lr * scale * update.norm())
+                scale = update.numel()**0.5 / update.norm()
                 p.data.add_(update, alpha=-lr * scale)
 
 class Adafactor(torch.optim.Optimizer):
