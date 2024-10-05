@@ -77,6 +77,7 @@ class SpectralSGDM(torch.optim.Optimizer):
                 g = g.add(buf, alpha=momentum) if group['nesterov'] else buf
                 update = zeroth_power_via_newtonschulz2(g)
                 scale = update.numel()**0.5 / update.norm()
+                #print(10 * lr * update.norm(), lr * scale * update.norm())
                 p.data.add_(update, alpha=-lr * scale)
 
 class CombinedOptimizer:
@@ -269,7 +270,7 @@ class GPT(nn.Module):
 
         optimizer = CombinedOptimizer([
             torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
-            SpectralSGDM(self.transformer.h.parameters(), lr=learning_rate, momentum=0.95)
+            SpectralSGDM(self.transformer.h.parameters(), lr=0.25 * learning_rate, momentum=0.95)
             #shampoo,
         ])
         return optimizer
