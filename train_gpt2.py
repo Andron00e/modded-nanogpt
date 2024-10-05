@@ -69,16 +69,37 @@ class SpectralSGDM(torch.optim.Optimizer):
                 if g is None:
                     continue
                 state = self.state[p]
-                state['steps'] = state.get('steps', 0) + 1
                 if 'momentum_buffer' not in state:
                     state['momentum_buffer'] = torch.zeros_like(g)
                 buf = state['momentum_buffer']
                 buf.mul_(momentum).add_(g)
                 g = g.add(buf, alpha=momentum) if group['nesterov'] else buf
                 update = zeroth_power_via_newtonschulz5(g)
-                scale = update.numel()**0.5 / update.norm()
+                scale = update.numel()**0.5 / update.norm() # make the MSE of the update equal to one
                 #print(10 * lr * update.norm(), lr * scale * update.norm())
                 p.data.add_(update, alpha=-lr * scale)
+
+class EmbeddingOptimizer(torch.optim.Optimizer):
+
+    def __init__(self, params, lr, momentum):
+        super().__init__(params, dict(lr=lr, momentum=momentum))
+        assert len(self.param_groups) == 1
+        assert len(self.param_groups[0]) == 1
+
+    def step(self):
+        group = self.param_groups[0]
+        p = group['params'][0]
+        g = p.grad
+        if g is None:
+            continue
+        state = self.state[p]
+        if 'momentum_buffer' not in state:
+            state['momentum_buffer'] = torch.zeros_like(g)
+        buf = state['momentum_buffer']
+        buf.mul_(momentum).add_(g)
+        update = g.add(buf, alpha=momentum) if group['nesterov'] else buf
+        update *= (update.size(1)**0.5 / update.norm(dim=1, keepdim=True)) # Make each embedding's update have MSE 1
+        p.data.add_(update, alpha=-lr)
 
 class CombinedOptimizer:
 
@@ -269,8 +290,9 @@ class GPT(nn.Module):
             )
 
         optimizer = CombinedOptimizer([
-            torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
-            SpectralSGDM(self.transformer.h.parameters(), lr=0.25 * learning_rate, momentum=0.95)
+            #torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0),
+            EmbeddingOptimizer(self.transformer.wte.parameters(), lr=learning_rate, momentum=0.90),
+            SpectralSGDM(self.transformer.h.parameters(), lr=0.20 * learning_rate, momentum=0.95)
             #shampoo,
         ])
         return optimizer
