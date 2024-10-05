@@ -472,8 +472,7 @@ if __name__ == "__main__":
         assert it <= args.num_iterations
         # 1) linear warmup for warmup_iters steps
         if it < args.warmup_iters:
-            #return (it+1) / args.warmup_iters
-            return 1.0
+            return (it+1) / args.warmup_iters
         # 2) constant lr for a while
         elif it < args.num_iterations - args.warmdown_iters:
             return 1.0
