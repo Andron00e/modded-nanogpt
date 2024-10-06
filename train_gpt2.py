@@ -240,10 +240,26 @@ class GPT(nn.Module):
         return logits, loss
 
     def configure_optimizers(self, weight_decay, learning_rate, betas):
-        optimizer = CombinedOptimizer([
-            torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0, fused=True),
-            OrthogonalNesterov(self.transformer.h.parameters(), lr=0.1*learning_rate, momentum=0.95)
-        ])
+        from distributed_shampoo.distributed_shampoo import DistributedShampoo
+        from distributed_shampoo.shampoo_types import AdamGraftingConfig
+        optimizer = DistributedShampoo(
+            self.parameters(),
+            lr=0.001,
+            betas=(0.9, 0.999),
+            epsilon=1e-12,
+            weight_decay=1e-05,
+            max_preconditioner_dim=8192,
+            precondition_frequency=100,
+            use_decoupled_weight_decay=False,
+            grafting_config=AdamGraftingConfig(
+                beta2=0.999,
+                epsilon=1e-08,
+            ),
+        )
+        #optimizer = CombinedOptimizer([
+        #    torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0, fused=True),
+        #    OrthogonalNesterov(self.transformer.h.parameters(), lr=0.1*learning_rate, momentum=0.95)
+        #])
         return optimizer
 
 # -----------------------------------------------------------------------------
