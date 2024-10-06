@@ -242,18 +242,24 @@ class GPT(nn.Module):
     def configure_optimizers(self, weight_decay, learning_rate, betas):
         from distributed_shampoo.distributed_shampoo import DistributedShampoo
         from distributed_shampoo.shampoo_types import AdamGraftingConfig
+        from distributed_shampoo.shampoo_types import AdamGraftingConfig, CommunicationDType, DDPShampooConfig
         optimizer = DistributedShampoo(
-            self.parameters(),
+            model.parameters(),
             lr=0.001,
             betas=(0.9, 0.999),
             epsilon=1e-12,
             weight_decay=1e-05,
             max_preconditioner_dim=8192,
             precondition_frequency=100,
-            use_decoupled_weight_decay=False,
+            use_decoupled_weight_decay=True,
             grafting_config=AdamGraftingConfig(
                 beta2=0.999,
-                epsilon=1e-08,
+                epsilon=1e-12,
+            ),
+            distributed_config=DDPShampooConfig(
+                communication_dtype=CommunicationDType.FP32,
+                num_trainers_per_group=8,
+                communicate_params=False,
             ),
         )
         #optimizer = CombinedOptimizer([
