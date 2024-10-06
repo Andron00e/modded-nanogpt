@@ -245,21 +245,21 @@ class GPT(nn.Module):
         from distributed_shampoo.shampoo_types import AdamGraftingConfig, CommunicationDType, DDPShampooConfig
         optimizer = CombinedOptimizer([DistributedShampoo(
             self.parameters(),
-            lr=0.001,
-            betas=(0.9, 0.999),
-            epsilon=1e-12,
-            weight_decay=1e-05,
+            lr=0.0018,
+            betas=(0.9, 0.95),
+            epsilon=1e-6,
+            weight_decay=0,
             max_preconditioner_dim=8192,
             precondition_frequency=100,
             use_decoupled_weight_decay=True,
             grafting_config=AdamGraftingConfig(
-                beta2=0.999,
-                epsilon=1e-12,
+                beta2=0.95,
+                epsilon=1e-6,
             ),
             distributed_config=DDPShampooConfig(
                 communication_dtype=CommunicationDType.FP32,
                 num_trainers_per_group=8,
-                communicate_params=False,
+                communicate_params=True,
             ),
         )])
         #optimizer = CombinedOptimizer([
