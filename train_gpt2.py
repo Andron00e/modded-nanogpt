@@ -244,7 +244,7 @@ class GPT(nn.Module):
         from distributed_shampoo.shampoo_types import AdamGraftingConfig
         from distributed_shampoo.shampoo_types import AdamGraftingConfig, CommunicationDType, DDPShampooConfig
         optimizer = DistributedShampoo(
-            model.parameters(),
+            self.parameters(),
             lr=0.001,
             betas=(0.9, 0.999),
             epsilon=1e-12,
