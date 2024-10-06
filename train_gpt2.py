@@ -243,7 +243,7 @@ class GPT(nn.Module):
         from distributed_shampoo.distributed_shampoo import DistributedShampoo
         from distributed_shampoo.shampoo_types import AdamGraftingConfig
         from distributed_shampoo.shampoo_types import AdamGraftingConfig, CommunicationDType, DDPShampooConfig
-        optimizer = DistributedShampoo(
+        optimizer = CombinedOptimizer([DistributedShampoo(
             self.parameters(),
             lr=0.001,
             betas=(0.9, 0.999),
@@ -261,7 +261,7 @@ class GPT(nn.Module):
                 num_trainers_per_group=8,
                 communicate_params=False,
             ),
-        )
+        )])
         #optimizer = CombinedOptimizer([
         #    torch.optim.AdamW(self.lm_head.parameters(), lr=learning_rate, betas=betas, weight_decay=0, fused=True),
         #    OrthogonalNesterov(self.transformer.h.parameters(), lr=0.1*learning_rate, momentum=0.95)
