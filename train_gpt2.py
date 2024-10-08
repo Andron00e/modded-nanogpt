@@ -2,6 +2,8 @@ import os
 import sys
 import uuid
 import glob
+import time
+import argparse
 from dataclasses import dataclass
 
 import numpy as np
@@ -282,7 +284,6 @@ class DistributedDataLoader:
         self.num_processes = num_processes
         self.B = B
         self.T = T
-        self.microbatch_size = B * T * num_processes
 
         # glob files that match the pattern
         self.files = sorted(glob.glob(filename_pattern))
@@ -332,36 +333,30 @@ def print0(*args, **kwargs):
         print(*args, **kwargs)
 
 if __name__ == "__main__":
-    import time
-    import argparse
     print0(f"Running pytorch {torch.version.__version__}")
 
     parser = argparse.ArgumentParser()
-    # file system input / output
-    parser.add_argument("--input_bin", type=str, help="input .bin to train on")
-    parser.add_argument("--input_val_bin", type=str, help="input .bin to eval validation loss on")
-    parser.add_argument("--model", type=str, default="d12", help="d12|d24|d36|d48")
-    # token layout for each step of the optimization
-    parser.add_argument("--batch_size", type=int, default=4, help="batch size, in units of #batch dimensions")
-    parser.add_argument("--accumulation", type=int, default=1)
-    parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
-    # workload (number of steps)
-    parser.add_argument("--num_iterations", type=int, default=10, help="number of iterations to run")
-    # optimization
-    parser.add_argument("--learning_rate", type=float, default=1e-4, help="learning rate warmup iterations")
-    parser.add_argument("--warmup_iters", type=int, default=0, help="learning rate warmup iterations")
-    parser.add_argument("--warmdown_iters", type=int, default=0, help="learning rate warmdown iterations")
-    parser.add_argument("--weight_decay", type=float, default=0.0, help="weight decay")
+    # file system sources of data
+    parser.add_argument("--input_bin", type=str,        default="data/fineweb10B/fineweb_train_*.bin", help="input .bin to train on")
+    parser.add_argument("--input_val_bin", type=str,    default="data/fineweb10B/fineweb_val_*.bin", help="input .bin to eval validation loss on")
+    # batch size, both globally and per device
+    parser.add_argument("--batch_size", type=int,       default=8*64, help="batch size, in sequences, across all devices")
+    parser.add_argument("--device_batch_size", type=int, default=64, help="batch size, in sequences, per device")
+    # tokens per sample and total number of steps
+    parser.add_argument("--sequence_length", type=int,  default=1024, help="sequence length, in tokens")
+    parser.add_argument("--num_iterations", type=int,   default=6676, help="number of iterations to run")
+    # learning rate schedule
+    parser.add_argument("--learning_rate", type=float,  default=0.0036, help="learning rate warmup iterations")
+    parser.add_argument("--warmup_iters", type=int,     default=0, help="learning rate warmup iterations")
+    parser.add_argument("--warmdown_iters", type=int,   default=2000, help="learning rate warmdown iterations")
+    # weight decay
+    parser.add_argument("--weight_decay", type=float,   default=0.0, help="weight decay")
     # evaluation
-    parser.add_argument("--val_loss_every", type=int, default=0, help="every how many steps to evaluate val loss?")
-    parser.add_argument("--val_tokens", type=int, default=20*2**19,
+    parser.add_argument("--val_loss_every", type=int,   default=128, help="every how many steps to evaluate val loss?")
+    parser.add_argument("--val_tokens", type=int,       default=10485760,
                         help="how many tokens of validation data? it's important to keep this invariant to other hparams when measuring small differences")
-    parser.add_argument("--save_every", type=int, default=0, help="every how many steps to save the checkpoint")
+    parser.add_argument("--save_every", type=int,       default=0, help="every how many steps to save the checkpoint")
     args = parser.parse_args()
-
-    # args error checking and convenience variables
-    B, T = args.batch_size, args.sequence_length
-    assert args.model in {"d12", "d24", "d36", "d48"}
 
     # set up DDP (distributed data parallel). torchrun sets this env variable
     assert torch.cuda.is_available()
@@ -374,6 +369,15 @@ if __name__ == "__main__":
     print(f"using device: {device}")
     master_process = (ddp_rank == 0) # this process will do logging, checkpointing etc.
 
+    # convenience variables
+    B, T = args.device_batch_size, args.sequence_length
+    # calculate the number of steps to take in the val loop.
+    assert args.val_tokens % (B * T * ddp_world_size) == 0
+    val_steps = args.val_tokens // (B * T * ddp_world_size)
+    # calculate the steps of gradient accumulation required to attain the desired global batch size.
+    assert args.batch_size % (B * ddp_world_size) == 0
+    train_accumulation_steps = args.batch_size // (B * ddp_world_size)
+
     # load tokens
     train_loader = DistributedDataLoader(args.input_bin, B, T, ddp_rank, ddp_world_size)
     print0(f"Training DataLoader: total number of tokens: {train_loader.ntok_total} across {len(train_loader.files)} files")
@@ -383,13 +387,7 @@ if __name__ == "__main__":
 
     # init the model from scratch
     num_vocab = 50257
-    model_config = {
-        "d12": GPTConfig(vocab_size=num_vocab, n_layer=12, n_head=12, n_embd=768),
-        "d24": GPTConfig(vocab_size=num_vocab, n_layer=24, n_head=16, n_embd=1024),
-        "d36": GPTConfig(vocab_size=num_vocab, n_layer=36, n_head=20, n_embd=1280),
-        "d48": GPTConfig(vocab_size=num_vocab, n_layer=48, n_head=25, n_embd=1600),
-    }[args.model]
-    model = GPT(model_config)
+    model = GPT(GPTConfig(vocab_size=num_vocab, n_layer=12, n_head=12, n_embd=768))
     model = model.cuda()
     if hasattr(config, "coordinate_descent_tuning"):
         config.coordinate_descent_tuning = True # suggested by @Chillee
@@ -403,10 +401,11 @@ if __name__ == "__main__":
     # set up a context manager following the desired dtype and device
     ctx = torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16)
 
-    # init the optimizer
-    optimizer = raw_model.configure_optimizers(weight_decay=args.weight_decay,
-                                               learning_rate=args.learning_rate, betas=(0.9, 0.95))
-
+    # init the optimizer(s)
+    optimizer1 = torch.optim.AdamW(model.lm_head.parameters(), lr=args.learning_rate, betas=(0.9, 0.95),
+                                   weight_decay=args.weight_decay, fused=True)
+    optimizer2 = OrthogonalNesterov(model.transformer.h.parameters(), lr=0.1*args.learning_rate, momentum=0.95)
+    optimizers = [optimizer1, optimizer2]
     # learning rate decay scheduler (linear warmup and warmdown)
     def get_lr(it):
         assert it <= args.num_iterations
@@ -420,6 +419,7 @@ if __name__ == "__main__":
         else:
             decay_ratio = (args.num_iterations - it) / args.warmdown_iters
             return decay_ratio
+    schedulers = [torch.optim.lr_scheduler.LambdaLR(opt, get_lr) for opt in optimizers]
 
     run_id = str(uuid.uuid4())
     if master_process:
@@ -437,15 +437,13 @@ if __name__ == "__main__":
             model.eval()
             val_loader.reset()
             val_loss = 0.0
-            assert args.val_tokens % val_loader.microbatch_size == 0
-            val_steps_per_device = args.val_tokens // val_loader.microbatch_size
-            for _ in range(val_steps_per_device):
+            for _ in range(val_steps):
                 with torch.no_grad(): # I want to use ctx here too but it causes a torch.compile error
                     x_val, y_val = val_loader.next_batch()
                     _, loss = model(x_val, y_val, return_logits=False)
                     val_loss += loss
             dist.all_reduce(val_loss, op=dist.ReduceOp.AVG)
-            val_loss /= val_steps_per_device
+            val_loss /= val_steps
             # log val loss to console and to logfile
             print0(f"val loss {val_loss}")
             if master_process and logfile is not None:
@@ -468,7 +466,7 @@ if __name__ == "__main__":
         t0 = time.time()
         # --------------- TRAINING SECTION BEGIN -----------------
         model.train()
-        for _ in range(args.accumulation):
+        for _ in range(train_accumulation_steps):
             # forward pass
             with ctx:
                 _, loss = model(x, y, return_logits=False)
@@ -478,20 +476,19 @@ if __name__ == "__main__":
             # backward pass
             loss.backward()
         for p in model.parameters():
-            p.grad /= args.accumulation
-        # determine and set the learning rate for this iteration
-        lr_scale = get_lr(step)
-        optimizer.scale_lrs(lr_scale)
-        # step the optimizer
-        optimizer.step()
-        optimizer.zero_grad(set_to_none=True)
+            p.grad /= train_accumulation_steps
+        # step the optimizers and schedulers
+        for opt, sched in zip(optimizers, schedulers):
+            opt.step()
+            sched.step()
+        model.zero_grad(set_to_none=True)
         # --------------- TRAINING SECTION END -------------------
         # everything that follows now is just diagnostics, prints, logging, etc.
         torch.cuda.synchronize()
-        t1 = time.time()
+        step_time_ms = time.time() - t0
 
         dist.all_reduce(train_loss, op=dist.ReduceOp.AVG)
-        tokens_per_second = args.accumulation * train_loader.microbatch_size / (t1 - t0)
+        tokens_per_second = (args.batch_size * T) / step_time_ms
         print0(f"step {step+1:4d}/{args.num_iterations} | train loss {train_loss.item():.4f} | lr_scale {lr_scale:.2e} | ({(t1-t0)*1000:.2f} ms | {tokens_per_second:.0f} tok/s)")
         # log training loss to logfile
         if master_process:
