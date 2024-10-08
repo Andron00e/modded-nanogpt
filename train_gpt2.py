@@ -297,21 +297,21 @@ class DistributedDataLoader:
 @dataclass
 class Hyperparameters:
     # data hyperparams
-    input_bin = 'data/fineweb10B/fineweb_train_*.bin', # input .bin to train on
+    input_bin = 'data/fineweb10B/fineweb_train_*.bin' # input .bin to train on
     input_val_bin = 'data/fineweb10B/fineweb_val_*.bin' # input .bin to eval validation loss on
     # optimization hyperparams
-    batch_size = 8*64, # batch size, in sequences, across all devices
-    device_batch_size = 64, # batch size, in sequences, per device
-    sequence_length = 1024, # sequence length, in tokens
-    num_iterations = 6676, # number of iterations to run
-    learning_rate = 0.0036,
-    warmup_iters = 0,
-    warmdown_iters = 2000, # number of iterations of linear warmup/warmdown for triangular or trapezoidal schedule
-    weight_decay = 0,
+    batch_size = 8*64 # batch size, in sequences, across all devices
+    device_batch_size = 64 # batch size, in sequences, per device
+    sequence_length = 1024 # sequence length, in tokens
+    num_iterations = 6676 # number of iterations to run
+    learning_rate = 0.0036
+    warmup_iters = 0
+    warmdown_iters = 2000 # number of iterations of linear warmup/warmdown for triangular or trapezoidal schedule
+    weight_decay = 0
     # evaluation and logging hyperparams
-    val_loss_every = 128, # every how many steps to evaluate val loss? 0 for only at the end
-    val_tokens = 10485760, # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
-    save_every = 0, # every how many steps to save the checkpoint? 0 for only at the end
+    val_loss_every = 128 # every how many steps to evaluate val loss? 0 for only at the end
+    val_tokens = 10485760 # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
+    save_every = 0 # every how many steps to save the checkpoint? 0 for only at the end
 args = Hyperparameters()
 
 # set up DDP (distributed data parallel). torchrun sets this env variable
