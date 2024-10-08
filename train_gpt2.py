@@ -420,9 +420,9 @@ for step in range(args.num_iterations + 1):
         val_loss /= val_steps
         # log val loss to console and to logfile
         if master_process:
-            print(f'VALIDATION step:{step+1}/{args.num_iterations} val_loss:{val_loss:4f} training_time:{training_time_ms:2f}')
+            print(f'VALIDATION step:{step+1}/{args.num_iterations} val_loss:{val_loss:.4f} training_time:{training_time_ms:.2f} step_avg:{training_time_ms/(step+1):.2f}')
             with open(logfile, "a") as f:
-                f.write(f'VALIDATION step:{step+1}/{args.num_iterations} val_loss:{val_loss:4f} training_time:{training_time_ms:2f}\n')
+                f.write(f'VALIDATION step:{step+1}/{args.num_iterations} val_loss:{val_loss:.4f} training_time:{training_time_ms:.2f} step_avg:{training_time_ms/(step+1):.2f}\n')
         # start the clock again
         torch.cuda.synchronize()
         t0 = time.time()
@@ -432,7 +432,7 @@ for step in range(args.num_iterations + 1):
         torch.cuda.synchronize()
         training_time_ms += time.time() - t0
         # save the state of the training process
-        log = dict(step=step, args=args.__dict__, code=code, model=raw_model.state_dict(), optimizer=optimizer.state_dict())
+        log = dict(step=step, code=code, model=raw_model.state_dict(), optimizers=[opt.state_dict() for opt in optimizers])
         torch.save(log, 'logs/%s/state_step%06d.pt' % (run_id, step))
         # start the clock again
         torch.cuda.synchronize()
@@ -447,7 +447,7 @@ for step in range(args.num_iterations + 1):
 
     # --------------- TRAINING SECTION BEGIN -----------------
     model.train()
-    for _ in range(train_accumulation_steps):
+    for i in range(1, train_accumulation_steps+1):
         # forward pass
         with ctx:
             _, loss = model(x, y, return_logits=False)
@@ -455,13 +455,18 @@ for step in range(args.num_iterations + 1):
         # advance the dataset for the next batch
         x, y = train_loader.next_batch()
         # backward pass
-        loss.backward()
+        if i < train_accumulation_steps:
+            with model.no_sync(): # there's no need to sync gradients every accumulation step
+                loss.backward()
+        else:
+            loss.backward() # just sync on the last step
     for p in model.parameters():
         p.grad /= train_accumulation_steps
     # step the optimizers and schedulers
     for opt, sched in zip(optimizers, schedulers):
         opt.step()
         sched.step()
+    # null the gradients
     model.zero_grad(set_to_none=True)
     # --------------- TRAINING SECTION END -------------------
     # everything that follows now is just diagnostics, prints, logging, etc.
@@ -470,9 +475,10 @@ for step in range(args.num_iterations + 1):
     tokens_per_second = (args.batch_size * T) / step_time_ms
     # log training loss to logfile
     if master_process:
-        print(f"TRAINING step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} lr_scale:{get_lr(step):.2e}")
+        approx_time = training_time_ms + time.time() - t0
+        print(f"TRAINING step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} training_time:{approx_time:.2f} step_avg:{approx_time/(step+1):.2f}")
         with open(logfile, "a") as f:
-            f.write(f"TRAINING step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} lr_scale:{get_lr(step):.2e}\n")
+            f.write(f"TRAINING step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} training_time:{approx_time:.2f} step_avg:{approx_time/(step+1):.2f}\n")
 
 if master_process:
     print(f"peak memory consumption: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB")
