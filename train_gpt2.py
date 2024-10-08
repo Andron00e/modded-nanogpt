@@ -1,12 +1,10 @@
 import os
 import sys
 with open(sys.argv[0]) as f:
-    code = f.read()
+    code = f.read() # read the code of this file ASAP, for logging
 import uuid
 import glob
 import time
-import types
-import argparse
 from dataclasses import dataclass
 
 import numpy as np
@@ -296,12 +294,6 @@ class DistributedDataLoader:
 # -----------------------------------------------------------------------------
 # int main
 
-def print0(*args, **kwargs):
-    # modified print that only prints from the master process
-    # if this is not a distributed run, it's just a print
-    if int(os.environ.get("RANK", 0)) == 0:
-        print(*args, **kwargs)
-
 @dataclass
 class Hyperparameters:
     # data hyperparams
@@ -321,8 +313,6 @@ class Hyperparameters:
     val_tokens = 10485760, # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
     save_every = 0, # every how many steps to save the checkpoint? 0 for only at the end
 args = Hyperparameters()
-
-print0(f"Running pytorch {torch.version.__version__}")
 
 # set up DDP (distributed data parallel). torchrun sets this env variable
 assert torch.cuda.is_available()
@@ -346,9 +336,10 @@ train_accumulation_steps = args.batch_size // (B * ddp_world_size)
 
 # load tokens
 train_loader = DistributedDataLoader(args.input_bin, B, T, ddp_rank, ddp_world_size)
-print0(f"Training DataLoader: total number of tokens: {train_loader.ntok_total} across {len(train_loader.files)} files")
 val_loader = DistributedDataLoader(args.input_val_bin, B, T, ddp_rank, ddp_world_size)
-print0(f"Validation DataLoader: total number of tokens: {val_loader.ntok_total} across {len(val_loader.files)} files")
+if master_process:
+    print(f"Training DataLoader: total number of tokens: {train_loader.ntok_total} across {len(train_loader.files)} files")
+    print(f"Validation DataLoader: total number of tokens: {val_loader.ntok_total} across {len(val_loader.files)} files")
 x, y = train_loader.next_batch()
 
 # init the model from scratch
@@ -357,7 +348,6 @@ model = GPT(GPTConfig(vocab_size=num_vocab, n_layer=12, n_head=12, n_embd=768))
 model = model.cuda()
 if hasattr(config, "coordinate_descent_tuning"):
     config.coordinate_descent_tuning = True # suggested by @Chillee
-print0("compiling the model...")
 model = torch.compile(model)
 # here we wrap model into DDP container
 model = DDP(model, device_ids=[ddp_local_rank])
@@ -386,10 +376,11 @@ def get_lr(it):
 schedulers = [torch.optim.lr_scheduler.LambdaLR(opt, get_lr) for opt in optimizers]
 
 # begin logging
-run_id = str(uuid.uuid4())
 if master_process:
-    os.makedirs('logs/%s' % run_id, exist_ok=True)
-    logfile = 'logs/%s/log.txt' % run_id
+    run_id = str(uuid.uuid4())
+    logdir = 'logs/%s/' % run_id
+    os.makedirs(logdir, exist_ok=True)
+    logfile = 'logs/%s.txt' % run_id
     # create the log file
     with open(logfile, "w") as f:
         # begin the log by printing this file (the Python code)
@@ -403,11 +394,20 @@ if master_process:
         f.write(f'{result.stdout}\n')
         f.write('='*100 + '\n')
 
+training_time_ms = 0
+# start the clock
+torch.cuda.synchronize()
+t0 = time.time()
+# begin training
 for step in range(args.num_iterations + 1):
     last_step = (step == args.num_iterations)
 
     # once in a while evaluate the validation dataset
     if (last_step or (args.val_loss_every > 0 and step % args.val_loss_every == 0)):
+        # stop the clock
+        torch.cuda.synchronize()
+        training_time_ms += time.time() - t0
+        # run validation batches
         model.eval()
         val_loader.reset()
         val_loss = 0.0
@@ -419,15 +419,24 @@ for step in range(args.num_iterations + 1):
         dist.all_reduce(val_loss, op=dist.ReduceOp.AVG)
         val_loss /= val_steps
         # log val loss to console and to logfile
-        print0(f"val loss {val_loss}")
-        if master_process and logfile is not None:
+        if master_process:
+            print(f'VALIDATION step:{step+1}/{args.num_iterations} val_loss:{val_loss:4f} training_time:{training_time_ms:2f}')
             with open(logfile, "a") as f:
-                f.write("s:%d tel:%f\n" % (step, val_loss))
+                f.write(f'VALIDATION step:{step+1}/{args.num_iterations} val_loss:{val_loss:4f} training_time:{training_time_ms:2f}\n')
+        # start the clock again
+        torch.cuda.synchronize()
+        t0 = time.time()
 
-    # save the state of the training process
     if master_process and (last_step or (args.save_every > 0 and step % args.save_every == 0)):
+        # stop the clock
+        torch.cuda.synchronize()
+        training_time_ms += time.time() - t0
+        # save the state of the training process
         log = dict(step=step, args=args.__dict__, code=code, model=raw_model.state_dict(), optimizer=optimizer.state_dict())
         torch.save(log, 'logs/%s/state_step%06d.pt' % (run_id, step))
+        # start the clock again
+        torch.cuda.synchronize()
+        t0 = time.time()
 
     # bit confusing: we want to make sure to eval on 0th iteration
     # but also after the very last iteration. so we loop for step <= num_iterations
@@ -436,8 +445,6 @@ for step in range(args.num_iterations + 1):
     if last_step:
         break
 
-    torch.cuda.synchronize()
-    t0 = time.time()
     # --------------- TRAINING SECTION BEGIN -----------------
     model.train()
     for _ in range(train_accumulation_steps):
@@ -458,18 +465,17 @@ for step in range(args.num_iterations + 1):
     model.zero_grad(set_to_none=True)
     # --------------- TRAINING SECTION END -------------------
     # everything that follows now is just diagnostics, prints, logging, etc.
-    torch.cuda.synchronize()
-    step_time_ms = time.time() - t0
 
-    dist.all_reduce(train_loss, op=dist.ReduceOp.AVG)
+    #dist.all_reduce(train_loss, op=dist.ReduceOp.AVG) # all-reducing the training loss would be more correct in terms of logging, but slower
     tokens_per_second = (args.batch_size * T) / step_time_ms
-    print0(f"step {step+1:4d}/{args.num_iterations} | train loss {train_loss.item():.4f} | lr_scale {lr_scale:.2e} | ({(t1-t0)*1000:.2f} ms | {tokens_per_second:.0f} tok/s)")
     # log training loss to logfile
     if master_process:
+        print(f"TRAINING step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} lr_scale:{get_lr(step):.2e}")
         with open(logfile, "a") as f:
-            f.write("s:%d trl:%f\n" % (step, train_loss.item()))
+            f.write(f"TRAINING step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} lr_scale:{get_lr(step):.2e}\n")
 
-print0(f"peak memory consumption: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB")
+if master_process:
+    print(f"peak memory consumption: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB")
 
 # -------------------------------------------------------------------------
 # clean up nice
