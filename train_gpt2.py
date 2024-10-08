@@ -428,9 +428,10 @@ for step in range(args.num_iterations + 1):
         val_loss /= val_steps
         # log val loss to console and to logfile
         if master_process:
-            print(f'VALIDATION step:{step+1}/{args.num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.1f}ms step_avg:{training_time_ms/(step+1):.1f}ms')
+            # the reason we divide the numerator of step_avg by step rather than step+1 is because we skipped timing the first step
+            print(f'VALIDATION step:{step+1}/{args.num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.1f}ms step_avg:{training_time_ms/step:.1f}ms')
             with open(logfile, "a") as f:
-                f.write(f'VALIDATION step:{step+1}/{args.num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.1f}ms step_avg:{training_time_ms/(step+1):.1f}ms\n')
+                f.write(f'VALIDATION step:{step+1}/{args.num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.1f}ms step_avg:{training_time_ms/step:.1f}ms\n')
         # start the clock again
         torch.cuda.synchronize()
         t0 = time.time()
@@ -482,9 +483,9 @@ for step in range(args.num_iterations + 1):
     #dist.all_reduce(train_loss, op=dist.ReduceOp.AVG) # all-reducing the training loss would be more correct in terms of logging, but slower
     if master_process:
         approx_time = training_time_ms + 1000 * (time.time() - t0)
-        print(f"TRAINING step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.2f} step_avg:{approx_time/(step+1):.2f}")
+        print(f"TRAINING step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.2f} step_avg:{approx_time/step:.2f}")
         with open(logfile, "a") as f:
-            f.write(f"TRAINING step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.2f} step_avg:{approx_time/(step+1):.2f}\n")
+            f.write(f"TRAINING step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.2f} step_avg:{approx_time/step:.2f}\n")
 
 if master_process:
     print(f"peak memory consumption: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB")
