@@ -356,9 +356,9 @@ raw_model = model.module # always contains the "raw" unwrapped model
 ctx = torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16)
 
 # init the optimizer(s)
-optimizer1 = torch.optim.AdamW(model.lm_head.parameters(), lr=args.learning_rate, betas=(0.9, 0.95),
+optimizer1 = torch.optim.AdamW(raw_model.lm_head.parameters(), lr=args.learning_rate, betas=(0.9, 0.95),
                                weight_decay=args.weight_decay, fused=True)
-optimizer2 = OrthogonalNesterov(model.transformer.h.parameters(), lr=0.1*args.learning_rate, momentum=0.95)
+optimizer2 = OrthogonalNesterov(raw_model.transformer.h.parameters(), lr=0.1*args.learning_rate, momentum=0.95)
 optimizers = [optimizer1, optimizer2]
 # learning rate decay scheduler (linear warmup and warmdown)
 def get_lr(it):
