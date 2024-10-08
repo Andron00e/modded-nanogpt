@@ -473,8 +473,6 @@ for step in range(args.num_iterations + 1):
     # everything that follows now is just diagnostics, prints, logging, etc.
 
     #dist.all_reduce(train_loss, op=dist.ReduceOp.AVG) # all-reducing the training loss would be more correct in terms of logging, but slower
-    tokens_per_second = (args.batch_size * T) / step_time_ms
-    # log training loss to logfile
     if master_process:
         approx_time = training_time_ms + time.time() - t0
         print(f"TRAINING step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} training_time:{approx_time:.2f} step_avg:{approx_time/(step+1):.2f}")
