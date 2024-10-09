@@ -62,11 +62,13 @@ class UnitarySGD(torch.optim.Optimizer):
     We use a quintic iteration and aggressively select the polynomial coefficients to minimize
     the number of necessary steps, even at the cost of mild non-convergence.
 
-    Some warnings: This optimizer assumes that all parameters passed in are 2D.
+    Some warnings:
+    - This optimizer assumes that all parameters passed in are 2D.
     - It shouldn't be used for the embedding layer, the final fully connected layer, or {0,1}-D
     parameters; those should be optimized by a standard method (e.g., AdamW).
     - It is unlikely to work well with small batch size, or for finetuning.
     - To use it with 4D convolutional filters, it works well to flatten their last 3 dimensions.
+    - We have not yet tried this optimizer for training scenarios larger than NanoGPT (124M).
     """
     def __init__(self, params, lr=0.02, momentum=0.9, nesterov=True, backend='newtonchulz5', backend_steps=5):
         defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov, backend=backend, backend_steps=backend_steps)
