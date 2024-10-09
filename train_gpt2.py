@@ -428,7 +428,7 @@ for step in range(args.num_iterations + 1):
         val_loader.reset()
         val_loss = 0.0
         for _ in range(val_steps):
-            with torch.no_grad():
+            with torch.no_grad(): # I want to use ctx here too but it causes a torch.compile error
                 x_val, y_val = val_loader.next_batch()
                 _, loss = model(x_val, y_val, return_logits=False)
                 val_loss += loss
