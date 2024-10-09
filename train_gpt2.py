@@ -52,7 +52,8 @@ class Neon(torch.optim.Optimizer):
                 buf.mul_(momentum).add_(g)
                 g = g.add(buf, alpha=momentum) if group['nesterov'] else buf
                 update = zeroth_power_via_newtonschulz5(g, steps=group['approx_steps'])
-                p.data.add_(update, alpha=-lr)
+                scale = update.numel()**0.5 / update.norm()
+                p.data.add_(update, alpha=-lr * scale)
 
 @torch.compile
 def zeroth_power_via_newtonschulz5(G, steps=10, eps=1e-7):
