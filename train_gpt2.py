@@ -410,12 +410,13 @@ t0 = time.time()
 train_loader.reset()
 for step in range(args.num_iterations + 1):
     last_step = (step == args.num_iterations)
-    # This effectively ignores the first step, which is very slow for torch.compile reasons.
-    # Alternately, and slightly more correctly, we could do step with dummy data first, and then
-    # re-initialize the model and reset the loader.
-    if step == 1:
+    # This effectively ignores timing first 10 steps, which are slower for weird reasons.
+    # Alternately, and slightly more correctly in terms of benchmarking, we could do 10
+    # steps with dummy data first, and then re-initialize the model and reset the loader.
+    if step == 10:
         training_time_ms = 0
         t0 = time.time()
+    timed_steps = float('nan') if step <= 10 else (step - 10)
 
     # once in a while evaluate the validation dataset
     if (last_step or (args.val_loss_every > 0 and step % args.val_loss_every == 0)):
@@ -435,9 +436,9 @@ for step in range(args.num_iterations + 1):
         val_loss /= val_steps
         # log val loss to console and to logfile
         if master_process:
-            print(f'step:{step+1}/{args.num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/(step+1):.2f}ms')
+            print(f'step:{step+1}/{args.num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/timed_steps:.2f}ms')
             with open(logfile, "a") as f:
-                f.write(f'step:{step+1}/{args.num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/(step+1):.2f}ms\n')
+                f.write(f'step:{step+1}/{args.num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/timed_steps:.2f}ms\n')
         # start the clock again
         torch.cuda.synchronize()
         t0 = time.time()
@@ -445,7 +446,7 @@ for step in range(args.num_iterations + 1):
     if master_process and (last_step or (args.save_every > 0 and step % args.save_every == 0)):
         # stop the clock
         torch.cuda.synchronize()
-        training_time_ms += 1000 * (time.time() - t0) * (2 if step == 1 else 1) # double-count the second step to make up for skipping the first
+        training_time_ms += 1000 * (time.time() - t0)
         # save the state of the training process
         log = dict(step=step, code=code, model=raw_model.state_dict(), optimizers=[opt.state_dict() for opt in optimizers])
         torch.save(log, 'logs/%s/state_step%06d.pt' % (run_id, step))
@@ -489,9 +490,9 @@ for step in range(args.num_iterations + 1):
     #dist.all_reduce(train_loss, op=dist.ReduceOp.AVG) # all-reducing the training loss would be more correct in terms of logging, but slower
     if master_process:
         approx_time = training_time_ms + 1000 * (time.time() - t0)
-        print(f"step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.0f}ms step_avg:{approx_time/(step+1):.2f}ms")
+        print(f"step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.0f}ms step_avg:{approx_time/timed_steps:.2f}ms")
         with open(logfile, "a") as f:
-            f.write(f"step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.0f}ms step_avg:{approx_time/(step+1):.2f}ms\n")
+            f.write(f"step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.0f}ms step_avg:{approx_time/timed_steps:.2f}ms\n")
 
 if master_process:
     print(f"peak memory consumption: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB")
