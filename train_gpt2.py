@@ -414,7 +414,7 @@ for step in range(args.num_iterations + 1):
     if step == 10:
         training_time_ms = 0
         t0 = time.time()
-    timed_steps = float('nan') if step <= 10 else (step - 10)
+    timed_steps = float('nan') if step <= 10 else (step - 10) + 1
 
     # once in a while evaluate the validation dataset
     if (last_step or (args.val_loss_every > 0 and step % args.val_loss_every == 0)):
