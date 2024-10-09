@@ -428,8 +428,8 @@ for step in range(args.num_iterations + 1):
         val_loader.reset()
         val_loss = 0.0
         for _ in range(val_steps):
-            with ctx: # of course, we'd like to use no_grad() here too, but that creates a torch.compile error for some reason
-                x_val, y_val = val_loader.next_batch()
+            x_val, y_val = val_loader.next_batch()
+            with torch.no_grad(): # of course, we'd like to use ctx here too, but that creates a torch.compile error for some reason
                 _, loss = model(x_val, y_val, return_logits=False)
                 val_loss += loss
         dist.all_reduce(val_loss, op=dist.ReduceOp.AVG)
