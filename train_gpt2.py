@@ -46,7 +46,7 @@ def unitary_via_newtonschulz5(G, steps=10, eps=1e-7):
         X = X.T
     return X.to(G.dtype)
 
-unitary_backends = dict(svd=unitary_via_svd, newtonschulz5=unitary_via_newtonchulz5)
+unitary_backends = dict(svd=unitary_via_svd, newtonschulz5=unitary_via_newtonschulz5)
 
 class UnitarySGD(torch.optim.Optimizer):
     """
