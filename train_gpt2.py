@@ -52,7 +52,7 @@ class Neon(torch.optim.Optimizer):
                 buf.mul_(momentum).add_(g)
                 g = g.add(buf, alpha=momentum) # nesterov momentum
                 update = zeroth_power_via_newtonschulz5(g, steps=group['approx_steps'])
-                scale = update.numel()**0.5 / update.norm()
+                scale = max(update.size(0), update.size(1))**0.5 # scale to have update.square().mean() == 1
                 p.data.add_(update, alpha=-lr * scale)
 
 @torch.compile
