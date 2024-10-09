@@ -33,8 +33,8 @@ class Neon(torch.optim.Optimizer):
     It is unlikely to work well with small batch size, or for finetuning.
     To use it with 4D convolutional filters, it works well to flatten their last 3 dimensions.
     """
-    def __init__(self, params, lr=0.02, momentum=0.9, nesterov=True, approx_steps=5):
-        defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov, approx_steps=approx_steps)
+    def __init__(self, params, lr=0.02, momentum=0.9, approx_steps=5):
+        defaults = dict(lr=lr, momentum=momentum, approx_steps=approx_steps)
         super().__init__(params, defaults)
 
     def step(self):
@@ -50,7 +50,7 @@ class Neon(torch.optim.Optimizer):
                     state['momentum_buffer'] = torch.zeros_like(g)
                 buf = state['momentum_buffer']
                 buf.mul_(momentum).add_(g)
-                g = g.add(buf, alpha=momentum) if group['nesterov'] else buf
+                g = g.add(buf, alpha=momentum) # nesterov momentum
                 update = zeroth_power_via_newtonschulz5(g, steps=group['approx_steps'])
                 scale = update.numel()**0.5 / update.norm()
                 p.data.add_(update, alpha=-lr * scale)
