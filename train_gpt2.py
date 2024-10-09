@@ -70,7 +70,7 @@ class UnitarySGD(torch.optim.Optimizer):
     - To use it with 4D convolutional filters, it works well to flatten their last 3 dimensions.
     - We have not yet tried this optimizer for training scenarios larger than NanoGPT (124M).
     """
-    def __init__(self, params, lr=0.02, momentum=0.9, nesterov=True, backend='newtonchulz5', backend_steps=5):
+    def __init__(self, params, lr=0.02, momentum=0.9, nesterov=True, backend='newtonschulz5', backend_steps=5):
         defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov, backend=backend, backend_steps=backend_steps)
         super().__init__(params, defaults)
 
