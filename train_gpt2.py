@@ -352,13 +352,15 @@ x, y = train_loader.next_batch()
 # init the model from scratch
 num_vocab = 50257
 model = GPT(GPTConfig(vocab_size=num_vocab, n_layer=12, n_head=12, n_embd=768))
-model = model.cuda().bfloat16()
+model = model.cuda()
 if hasattr(config, "coordinate_descent_tuning"):
     config.coordinate_descent_tuning = True # suggested by @Chillee
 model = torch.compile(model)
 # here we wrap model into DDP container
 model = DDP(model, device_ids=[ddp_local_rank])
 raw_model = model.module # always contains the "raw" unwrapped model
+# set up a context manager following the desired dtype and device
+ctx = torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16)
 
 # init the optimizer(s)
 optimizer1 = torch.optim.AdamW(raw_model.lm_head.parameters(), lr=args.learning_rate, betas=(0.9, 0.95),
@@ -462,9 +464,10 @@ for step in range(args.num_iterations + 1):
     # --------------- TRAINING SECTION BEGIN -----------------
     model.train()
     for i in range(1, train_accumulation_steps+1):
-        # forward pass
-        _, loss = model(x, y, return_logits=False)
-        train_loss = loss.detach()
+        with ctx:
+            # forward pass
+            _, loss = model(x, y, return_logits=False)
+            train_loss = loss.detach()
         # advance the dataset for the next batch
         x, y = train_loader.next_batch()
         # backward pass
