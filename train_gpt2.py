@@ -24,10 +24,13 @@ class UnitarySGD(torch.optim.Optimizer):
     weights using the semi-unitary factor U of the polar decomposition G_t = UP. This update is also
     equivalent to UV^T where G_t = USV^T is the SVD of G_t. And if momentum is turned off, then it
     is equivalent to the update produced by Shampoo (https://arxiv.org/abs/1802.09568) with no
-    accumulation.
+    accumulation. Our motivation in designing this method is to obtain a simple and efficient
+    approximation to Shampoo.
 
-    As the backend method used to generate an approximation of this unitary factor, we use a
-    quintic Newton-Schulz iteration.
+    Calculating the unitary factor can be accomplished by a number of backend algorithms. We use
+    a Newton-Schulz iteration, which we find can has the advantage that it can be run in bfloat16.
+    We use a quintic iteration and aggressively select the polynomial coefficients to minimize
+    the number of necessary steps, even at the cost of mild non-convergence.
 
     Some warnings: This optimizer assumes that all parameters passed in are 2D.
     It shouldn't be used for the embedding layer, the final fully connected layer, or {0,1}-D
