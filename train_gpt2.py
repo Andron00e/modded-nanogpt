@@ -90,8 +90,12 @@ class UnitarySGD(torch.optim.Optimizer):
                 buf.mul_(momentum).add_(g)
                 if group['nesterov']:
                     g = g.add(buf, alpha=momentum)
-                g = unitary_backend(g, steps=group['backend_steps'])
-                scale = max(g.size(0), g.size(1))**0.5 # scale to have update.square().mean() == 1
+                if g.size(0) == 3 * g.size(1):
+                    g = torch.cat([unitary_backend(g1, steps=group['backend_steps']) for g1 in g.split(g.size(1))])
+                    scale = g.size(1)**0.5
+                else:
+                    g = unitary_backend(g, steps=group['backend_steps'])
+                    scale = max(g.size(0), g.size(1))**0.5 # scale to have update.square().mean() == 1
                 p.data.add_(g, alpha=-lr * scale)
 
 # -----------------------------------------------------------------------------
@@ -140,10 +144,7 @@ class CausalSelfAttention(nn.Module):
         self.head_dim = self.n_embd // self.n_head
         assert self.n_embd % self.n_head == 0
         # key, query, value projections for all heads, but in a batch
-        self.c_q = nn.Linear(self.n_embd, self.n_embd, bias=False)
-        self.c_k = nn.Linear(self.n_embd, self.n_embd, bias=False)
-        self.c_v = nn.Linear(self.n_embd, self.n_embd, bias=False)
-        #self.c_attn = nn.Linear(self.n_embd, 3 * self.n_embd, bias=False)
+        self.c_attn = nn.Linear(self.n_embd, 3 * self.n_embd, bias=False)
         # output projection
         self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
         self.rotary = Rotary(self.head_dim)
@@ -151,9 +152,8 @@ class CausalSelfAttention(nn.Module):
     def forward(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        #qkv = self.c_attn(x)
-        #q, k, v = qkv.split(self.n_embd, dim=2)
-        q, k, v = self.c_q(x), self.c_k(x), self.c_v(x)
+        qkv = self.c_attn(x)
+        q, k, v = qkv.split(self.n_embd, dim=2)
         k = k.view(B, T, self.n_head, self.head_dim)
         q = q.view(B, T, self.n_head, self.head_dim)
         v = v.view(B, T, self.n_head, self.head_dim)
