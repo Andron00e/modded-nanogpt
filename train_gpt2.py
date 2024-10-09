@@ -91,7 +91,7 @@ class UnitarySGD(torch.optim.Optimizer):
                 if group['nesterov']:
                     g = g.add(buf, alpha=momentum)
                 g = unitary_backend(g, steps=group['backend_steps'])
-                scale = max(g.size(0), update.size(1))**0.5 # scale to have update.square().mean() == 1
+                scale = max(g.size(0), g.size(1))**0.5 # scale to have update.square().mean() == 1
                 p.data.add_(g, alpha=-lr * scale)
 
 # -----------------------------------------------------------------------------
