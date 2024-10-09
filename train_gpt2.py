@@ -435,7 +435,6 @@ for step in range(args.num_iterations + 1):
         val_loss /= val_steps
         # log val loss to console and to logfile
         if master_process:
-            # the reason we divide the numerator of step_avg by step rather than step+1 is because we skipped timing the first step
             print(f'validation step:{step+1}/{args.num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/(step+1):.2f}ms')
             with open(logfile, "a") as f:
                 f.write(f'validation step:{step+1}/{args.num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/(step+1):.2f}ms\n')
@@ -446,7 +445,7 @@ for step in range(args.num_iterations + 1):
     if master_process and (last_step or (args.save_every > 0 and step % args.save_every == 0)):
         # stop the clock
         torch.cuda.synchronize()
-        training_time_ms += 1000 * (time.time() - t0) * (2 if step == 1 else 1) # double-count the second step cause we skip the first step
+        training_time_ms += 1000 * (time.time() - t0) * (2 if step == 1 else 1) # double-count the second step to make up for skipping the first
         # save the state of the training process
         log = dict(step=step, code=code, model=raw_model.state_dict(), optimizers=[opt.state_dict() for opt in optimizers])
         torch.save(log, 'logs/%s/state_step%06d.pt' % (run_id, step))
